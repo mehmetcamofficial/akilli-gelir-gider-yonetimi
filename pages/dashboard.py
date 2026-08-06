@@ -68,11 +68,12 @@ def show():
         try:
             SessionLocal = sessionmaker(bind=engine)
             sess_pdf = SessionLocal()
-            if not df.empty:
-                smin = df.transaction_date.min().date()
-                smax = df.transaction_date.max().date()
-                pdf_bytes = reporting_service.generate_invoice_list_pdf(sess_pdf, smin, smax)
-                st.download_button("Fatura Listesi PDF İndir", data=pdf_bytes, file_name="transactions.pdf", mime="application/pdf")
+                if not df.empty:
+                    smin = df.transaction_date.min().date()
+                    smax = df.transaction_date.max().date()
+                    logo_path = 'assets/logo_iglesias_tour_turkey.png'
+                    pdf_bytes = reporting_service.generate_invoice_list_pdf(sess_pdf, smin, smax, logo_path=logo_path)
+                    st.download_button("Fatura Listesi PDF İndir", data=pdf_bytes, file_name="transactions.pdf", mime="application/pdf")
             sess_pdf.close()
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
@@ -130,7 +131,8 @@ def show():
             try:
                 SessionPdf = sessionmaker(bind=engine)
                 sesspdf = SessionPdf()
-                pdf_bytes = reporting_service.generate_product_profitability_pdf(sesspdf, start_date, end_date)
+                logo_path = 'assets/logo_iglesias_tour_turkey.png'
+                pdf_bytes = reporting_service.generate_product_profitability_pdf(sesspdf, start_date, end_date, logo_path=logo_path)
                 st.download_button("Ürün Kârlılık PDF İndir", data=pdf_bytes, file_name="product_profitability.pdf", mime="application/pdf")
                 sesspdf.close()
             except Exception as e:
