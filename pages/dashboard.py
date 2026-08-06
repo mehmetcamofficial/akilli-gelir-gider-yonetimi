@@ -118,7 +118,7 @@ def show():
         pdf = pd.DataFrame(rows).sort_values('profit', ascending=False)
         st.write("En kârlı ürünler")
         st.bar_chart(pdf.set_index('product')['profit'].head(10))
-        st.dataframe(pdf)
+        st.dataframe(pdf, height=300)
         csv2 = pdf.to_csv(index=False).encode('utf-8')
         st.download_button("Ürün Kârlılık CSV İndir", data=csv2, file_name="product_profitability.csv", mime="text/csv")
         try:
@@ -252,7 +252,7 @@ def show():
 
             df_pivot['net'] = df_pivot.get('inflow', 0) - df_pivot.get('outflow', 0)
             st.area_chart(df_pivot.fillna(0))
-            st.dataframe(df_pivot)
+            st.dataframe(df_pivot, height=300)
             st.download_button('Nakit Tahmini CSV İndir', data=df_pivot.reset_index().to_csv(index=False).encode('utf-8'), file_name='cashflow_forecast.csv')
         else:
             st.info('Seçilen dönem için vadesi gelen işlem bulunamadı.')
@@ -273,8 +273,37 @@ def show():
                 due_rows.append({'Tarih': t.due_date.strftime('%d.%m.%Y') if hasattr(t.due_date, 'strftime') else str(t.due_date), 'No': t.invoice_number or '', 'Taraf': t.party_name or '', 'Kalan': float(t.remaining_amount or 0), 'Durum': t.payment_status or ''})
             df_due = pd.DataFrame(due_rows)
             st.warning(f"{len(df_due)} adet vadesi yaklaşan/ödenmemiş işlem bulundu (son {days_ahead} gün).")
-            st.dataframe(df_due)
+            # style: kalan>0 kırmızı, durum renkleri
+            def color_kalan(v):
+                try:
+                    return 'color: red; font-weight: bold' if float(v) > 0 else ''
+                except Exception:
+                    return ''
+
+            def color_durum(v):
+                if not isinstance(v, str):
+                    return ''
+                low = v.lower()
+                if low in ('ödenmedi', 'unpaid'):
+                    return 'background-color: #fff3cd'
+                if low in ('kısmen ödendi', 'partially_paid', 'partial'):
+                    return 'background-color: #ffeeba'
+                if low in ('ödendi', 'paid'):
+                    return 'background-color: #d4edda'
+                return ''
+
+            styled = df_due.style.applymap(color_kalan, subset=['Kalan']).applymap(color_durum, subset=['Durum'])
+            st.dataframe(styled, height=300)
             st.download_button('Vade Uyarıları CSV', data=df_due.to_csv(index=False).encode('utf-8'), file_name='due_alerts.csv')
+            # reminders: TXT export and simulated send
+            reminder_text = "\n".join([f"Fatura: {r['No']} | {r['Taraf']} | Vade: {r['Tarih']} | Kalan: {r['Kalan']}" for r in due_rows])
+            ra, rb = st.columns([1,1])
+            with ra:
+                if st.button('Hatırlatma Gönder (Simülasyon)'):
+                    st.success(f"{len(df_due)} hatırlatma simülasyonu gönderildi.")
+                    st.code(reminder_text)
+            with rb:
+                st.download_button('Hatırlatma TXT İndir', data=reminder_text.encode('utf-8'), file_name='reminders.txt')
         else:
             st.success('Belirtilen aralıkta vadesi yaklaşan veya ödenmemiş işlem yok.')
         sess3.close()
