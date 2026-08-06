@@ -23,7 +23,14 @@ def validate_line_totals(line_items: List[dict]) -> dict:
         unit_price = Decimal(str(r.get('unit_price', 0)))
         discount = Decimal(str(r.get('discount_amount', 0)))
         add_cost = Decimal(str(r.get('additional_cost', 0)))
-        tax = Decimal(str(r.get('tax_amount', 0)))
+        # if tax_rate provided, compute tax_amount
+        if 'tax_rate' in r:
+            try:
+                tax = (qty * unit_price - discount + add_cost) * Decimal(str(r.get('tax_rate',0))) / Decimal('100')
+            except Exception:
+                tax = Decimal('0.00')
+        else:
+            tax = Decimal(str(r.get('tax_amount', 0)))
         line_sub = qty * unit_price - discount + add_cost
         subtotal += (qty * unit_price - discount)
         tax_total += tax

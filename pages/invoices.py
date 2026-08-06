@@ -43,6 +43,7 @@ def show():
         due_date = st.date_input("Vade Tarihi")
         invoice_number = st.text_input("Fatura Numarası")
         party = st.text_input("Firma / Müşteri / Tedarikçi")
+        invoice_type = st.selectbox("Fatura Türü", ["sale", "purchase"], format_func=lambda x: "Satış" if x=="sale" else "Alış")
         currency = st.selectbox("Para Birimi", ["TRY", "EUR", "USD"], index=0)
 
         st.markdown("**Kalemler**")
@@ -72,7 +73,15 @@ def show():
             with cols[5]:
                 row["additional_cost"] = st.number_input(f"Ek Maliyet {i+1}", min_value=0.0, value=float(row.get("additional_cost",0.0)), step=0.01, key=f"addc_{i}")
             with cols[6]:
-                row["tax_amount"] = st.number_input(f"KDV {i+1}", min_value=0.0, value=float(row.get("tax_amount",0.0)), step=0.01, key=f"tax_{i}")
+                row["tax_rate"] = st.number_input(f"KDV Oranı (%) {i+1}", min_value=0.0, value=float(row.get("tax_rate",18.0)), step=0.01, key=f"taxrate_{i}")
+                # compute tax amount automatically
+                try:
+                    base = Decimal(str(row.get('quantity',0))) * Decimal(str(row.get('unit_price',0))) - Decimal(str(row.get('discount_amount',0))) + Decimal(str(row.get('additional_cost',0)))
+                    tax_amt = (base * Decimal(str(row.get('tax_rate',0)))) / Decimal('100')
+                except Exception:
+                    tax_amt = Decimal('0.00')
+                row['tax_amount'] = float(tax_amt)
+                st.write(f"KDV Tutarı: {tax_amt:.2f}")
             if st.button(f"Satırı Sil {i+1}", key=f"del_{i}"):
                 remove_row(i)
                 st.experimental_rerun()
@@ -96,6 +105,7 @@ def show():
             else:
                 txn = Transaction(
                     transaction_type="income" if sums['grand_total']>=0 else "expense",
+                    invoice_type=invoice_type,
                     transaction_date=inv_date,
                     document_date=inv_date,
                     due_date=due_date,

@@ -56,5 +56,19 @@ def init_and_seed():
     seed_demo_data()
 
 
+def migrate_add_invoice_type():
+    # Add invoice_type column to transactions if missing (SQLite)
+    from .db import engine
+    conn = engine.connect()
+    res = conn.exec_driver_sql("PRAGMA table_info(transactions);")
+    cols = [r[1] for r in res.fetchall()]
+    if 'invoice_type' not in cols:
+        try:
+            conn.exec_driver_sql("ALTER TABLE transactions ADD COLUMN invoice_type VARCHAR(20);")
+        except Exception:
+            pass
+    conn.close()
+
+
 if __name__ == "__main__":
     init_and_seed()

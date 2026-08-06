@@ -18,6 +18,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True)
     transaction_type = Column(String(20), nullable=False)  # income or expense
+    invoice_type = Column(String(20), nullable=True)  # sale or purchase (optional)
     transaction_date = Column(DateTime, default=datetime.utcnow)
     document_date = Column(DateTime, nullable=True)
     due_date = Column(DateTime, nullable=True)
