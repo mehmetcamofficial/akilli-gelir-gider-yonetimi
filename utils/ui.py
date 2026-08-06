@@ -1,5 +1,4 @@
 import streamlit as st
-import urllib.parse
 
 BASE_BACKGROUND = "#f5f7fb"
 CARD_BACKGROUND = "#ffffff"
@@ -307,67 +306,55 @@ def sidebar_brand():
 
 
 def sidebar_menu(menu_groups):
-    selected_page = st.query_params.get("page")
-    if not selected_page:
-        selected_page = menu_groups[0][1][0]
+    default_page = menu_groups[0][1][0]
+    st.session_state.setdefault("active_page", default_page)
+    valid_pages = {option for _, options in menu_groups for option in options}
+    if st.session_state.active_page not in valid_pages:
+        st.session_state.active_page = default_page
 
-    nav_html = ["<div class='sidebar-nav'>"]
     for group_title, options in menu_groups:
-        nav_html.append(f"<div class='sidebar-group-title'>{group_title}</div>")
+        st.sidebar.markdown(f"<div class='sidebar-group-title'>{group_title}</div>", unsafe_allow_html=True)
         for option in options:
-            active = option == selected_page
-            page_param = urllib.parse.quote_plus(option)
-            icon = "🟢" if active else "▫️"
-            nav_html.append(
-                f"<a class='sidebar-nav-item{' active' if active else ''}' href='?page={page_param}'>"
-                f"<span class='sidebar-nav-icon'>{icon}</span>"
-                f"<span class='sidebar-nav-text'>{option}</span>"
-                f"</a>"
-            )
-    nav_html.append("</div>")
+            active = option == st.session_state.active_page
+            if st.sidebar.button(
+                f"{'●' if active else '○'} {option}",
+                key=f"sidebar_page_{option}",
+                type="primary" if active else "secondary",
+                width="stretch",
+            ):
+                st.session_state.active_page = option
+                st.rerun()
 
-    st.sidebar.markdown("""
-        <style>
-        .sidebar-nav { display: grid; gap: 0.45rem; }
-        .sidebar-nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 0.95rem; border-radius: 14px; text-decoration: none; color: #1f2937; background: rgba(255,255,255,0.88); border: 1px solid transparent; transition: all 0.2s ease; }
-        .sidebar-nav-item:hover { background: rgba(14,165,233,0.12); border-color: rgba(14,165,233,0.18); }
-        .sidebar-nav-item.active { background: rgba(14,165,233,0.12); border-color: #0c4a6e; color: #0c4a6e; font-weight: 700; }
-        .sidebar-nav-icon { width: 1.35rem; display: inline-flex; justify-content: center; }
-        .sidebar-nav-text { flex: 1; }
-        </style>
-    """, unsafe_allow_html=True)
+    return st.session_state.active_page
 
-    st.sidebar.markdown("".join(nav_html), unsafe_allow_html=True)
-    return selected_page
+
+def _navigate_to(page):
+    st.session_state.active_page = page
+    st.rerun()
 
 
 def render_quick_action_cards(actions, columns=3):
     cols = st.columns(columns, gap="large")
     for index, action in enumerate(actions):
         with cols[index % columns]:
-            st.markdown(
-                f"""
-                <a class='quick-action-card' href='?page={urllib.parse.quote_plus(action['page'])}'>
-                    <div class='quick-action-icon'>{action.get('icon','⚡')}</div>
-                    <div class='quick-action-title'>{action['label']}</div>
-                    <div class='quick-action-help'>{action.get('help','')}</div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
+            if st.button(
+                f"{action.get('icon', '⚡')} {action['label']}",
+                key=f"quick_action_{action['page']}_{index}",
+                help=action.get("help", ""),
+                width="stretch",
+            ):
+                _navigate_to(action["page"])
 
 
 def action_button(label, page=None, icon=None):
     if page:
-        href = f"?page={urllib.parse.quote_plus(page)}"
-        st.markdown(
-            f"""
-            <a class='action-button' href='{href}'>
-                <span>{icon or '➕'} {label}</span>
-            </a>
-            """,
-            unsafe_allow_html=True,
-        )
+        if st.button(
+            f"{icon or '➕'} {label}",
+            key=f"page_action_{page}_{label}",
+            type="primary",
+            width="stretch",
+        ):
+            _navigate_to(page)
     else:
         return st.button(label)
 

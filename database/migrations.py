@@ -258,6 +258,7 @@ def delete_demo_data():
         "customers": 0,
         "suppliers": 0,
         "transactions": 0,
+        "invoices": 0,
         "collections": 0,
         "supplier_payments": 0,
         "documents": 0,
@@ -266,6 +267,11 @@ def delete_demo_data():
         booking_ids = [row[0] for row in session.query(Booking.id).filter(Booking.is_demo.is_(True))]
         tour_ids = [row[0] for row in session.query(Tour.id).filter(Tour.is_demo.is_(True))]
         transaction_ids = [row[0] for row in session.query(Transaction.id).filter(Transaction.is_demo.is_(True))]
+        deleted["invoices"] = session.query(Transaction).filter(
+            Transaction.id.in_(transaction_ids),
+            Transaction.invoice_number.isnot(None),
+            Transaction.invoice_number != "",
+        ).count() if transaction_ids else 0
 
         if booking_ids:
             for model in (Passenger, BookingService, HotelBooking, GuideAssignment, Transfer,
@@ -321,6 +327,16 @@ def delete_demo_data():
         session.query(SalesChannel).filter(SalesChannel.is_demo.is_(True)).delete(
             synchronize_session=False
         )
+        session.flush()
+        remaining = sum(
+            session.query(model).filter(model.is_demo.is_(True)).count()
+            for model in (
+                Booking, Tour, Customer, Supplier, Transaction, Collection,
+                SupplierPayment, Document, Staff, SalesChannel, HotelBooking,
+            )
+        )
+        if remaining:
+            raise RuntimeError(f"{remaining} demo kaydı silinemedi; işlem geri alındı.")
         session.commit()
         return deleted
     except Exception:
@@ -337,12 +353,9 @@ def restore_demo_data():
 
 def init_and_seed():
     from .db import engine
-    first_initialization = not inspect(engine).get_table_names()
     Base.metadata.create_all(bind=engine)
     migrate_schema()
     mark_legacy_demo_data()
-    if first_initialization:
-        seed_demo_data()
 
 
 def migrate_schema():
@@ -411,6 +424,10 @@ def mark_legacy_demo_data():
         )
         connection.exec_driver_sql(
             "UPDATE hotel_bookings SET is_demo = 1 WHERE booking_id IN (SELECT id FROM bookings WHERE is_demo = 1)"
+        )
+        connection.exec_driver_sql(
+            "UPDATE transactions SET is_demo = 1 "
+            "WHERE description LIKE 'Demo işlem %' AND invoice_number LIKE 'FAT-%'"
         )
 
 

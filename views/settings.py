@@ -9,6 +9,7 @@ from services.google_drive_config import (
     list_drive_files,
     save_drive_config,
 )
+from views.drive_import import render_drive_file_list
 
 
 def render_settings():
@@ -114,6 +115,9 @@ def render_settings():
         else:
             st.write("Henüz bağlantı testi yapılmadı.")
 
+    if st.session_state.gdrive_connected:
+        render_drive_file_list(key_prefix="settings_drive", show_import=True)
+
     st.markdown("---")
     st.write("Eğer Streamlit Cloud'da çalışıyorsanız, servis hesabı bilgilerini `st.secrets` içinde saklayın ve buraya yapıştırmayın.")
 
@@ -133,6 +137,7 @@ def render_settings():
                     "transactions": "Silinen finans işlemi",
                     "collections": "Silinen tahsilat",
                     "supplier_payments": "Silinen ödeme",
+                    "invoices": "Silinen fatura",
                     "documents": "Silinen belge",
                 }
                 columns = st.columns(4)
@@ -162,10 +167,10 @@ def render_settings():
                 st.rerun()
 
         with demo_col2:
-            if st.button("Demo Verilerini Geri Yükle"):
+            if st.button("Demo Verilerini Yükle"):
                 restore_demo_data()
                 st.cache_data.clear()
                 st.cache_resource.clear()
-                st.success("Demo verileri yeniden yüklendi.")
+                st.success("Demo verileri yüklendi.")
 
         st.warning("Bu işlem geri alınamaz; gerçek kullanıcı kayıtları etkilenmez.")

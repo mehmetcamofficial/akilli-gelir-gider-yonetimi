@@ -26,13 +26,7 @@ def create_drive_service(service_account_info):
 
 
 def list_drive_excel_files(folder_id, service):
-    query = (
-        f"'{folder_id}' in parents and trashed = false and ("
-        "mimeType = 'application/vnd.google-apps.spreadsheet' or "
-        "mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or "
-        "mimeType = 'application/vnd.ms-excel' or "
-        "mimeType = 'text/csv')"
-    )
+    query = f"'{folder_id}' in parents and trashed = false"
     results = []
     page_token = None
 
@@ -44,9 +38,7 @@ def list_drive_excel_files(folder_id, service):
             pageToken=page_token,
             pageSize=200,
         ).execute()
-        files = response.get("files", [])
-        for f in files:
-            results.append(f)
+        results.extend(response.get("files", []))
         page_token = response.get("nextPageToken")
         if not page_token:
             break
