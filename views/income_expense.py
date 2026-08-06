@@ -7,7 +7,7 @@ from database.models import Transaction, Category
 from services.storage_service import save_uploaded_file
 
 
-def show():
+def render_income_expense():
     st.header("Gelir ve Gider Kaydı")
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -45,7 +45,6 @@ def show():
             session.refresh(txn)
 
             if uploaded_file is not None:
-                # save file and link
                 save_uploaded_file(uploaded_file, "income" if ttype=="income" else "expense", session, transaction_id=txn.id)
 
             st.success("İşlem kaydedildi.")

@@ -27,7 +27,7 @@ def remove_row(idx: int):
         st.session_state.invoice_rows.pop(idx)
 
 
-def show():
+def render_invoices():
     st.header("Faturalar ve Belgeler")
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -81,17 +81,13 @@ def show():
             cols = st.columns([3,1,1,1,1,1,1])
             with cols[0]:
                 row["description"] = st.text_input(f"Açıklama {i+1}", value=row.get("description", ""), key=f"desc_{i}")
-                # product selector
                 prod_choice = st.selectbox(f"Ürün {i+1}", options=["-" ] + list(product_options.values()), key=f"prod_{i}")
-                # map back selected product id
                 selected_pid = None
                 if prod_choice and prod_choice != "-":
-                    # find id by matching value
                     for pid, label in product_options.items():
                         if label == prod_choice:
                             selected_pid = int(pid)
                             break
-                # if product selected and no tax_rate set, use product default
                 row['product_id'] = selected_pid
                 if selected_pid and not row.get('tax_rate'):
                     prod = session.query(Product).filter(Product.id == int(selected_pid)).first()
@@ -109,7 +105,6 @@ def show():
                 row["additional_cost"] = st.number_input(f"Ek Maliyet {i+1}", min_value=0.0, value=float(row.get("additional_cost",0.0)), step=0.01, key=f"addc_{i}")
             with cols[6]:
                 row["tax_rate"] = st.number_input(f"KDV Oranı (%) {i+1}", min_value=0.0, value=float(row.get("tax_rate",18.0)), step=0.01, key=f"taxrate_{i}")
-                # compute tax amount automatically
                 try:
                     base = Decimal(str(row.get('quantity',0))) * Decimal(str(row.get('unit_price',0))) - Decimal(str(row.get('discount_amount',0))) + Decimal(str(row.get('additional_cost',0)))
                     tax_amt = (base * Decimal(str(row.get('tax_rate',0)))) / Decimal('100')
@@ -117,9 +112,6 @@ def show():
                     tax_amt = Decimal('0.00')
                 row['tax_amount'] = float(tax_amt)
                 st.write(f"KDV Tutarı: {tax_amt:.2f}")
-            # row delete button moved outside the form to avoid Streamlit form API errors
-
-        # add row button moved outside the form
 
         uploaded_file = st.file_uploader("Fatura Belgesi (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"]) 
         grand_total_input = st.number_input("Genel Toplam (Elle gir, yoksa 0)", min_value=0.0, value=0.0, step=0.01)
@@ -143,7 +135,6 @@ def show():
 
     if submitted:
         try:
-            # validations
             if is_duplicate_invoice(session, invoice_number, party) and not editing_id:
                 st.warning("Aynı fatura numarası bu firma için zaten kayıtlı.")
 
@@ -152,28 +143,21 @@ def show():
                 st.error(f"Elle girilmiş toplam ({grand_total_input}) ile hesaplanan toplam ({sums['grand_total']}) arasında fark var.")
             else:
                 if editing_id:
-                    # update existing transaction
                     txn = session.query(Transaction).filter(Transaction.id == int(editing_id)).first()
                     if not txn:
                         st.error("Düzenlenecek fatura bulunamadı.")
                     else:
-                        # revert stock effects of old items
                         old_items = session.query(InvoiceItem).filter(InvoiceItem.invoice_id == txn.id).all()
                         from services.product_service import adjust_stock_delta
                         for oi in old_items:
                             if oi.product_id:
-                                # revert depending on invoice_type
                                 if txn.invoice_type == 'purchase':
-                                    # previously increased stock -> reduce
                                     adjust_stock_delta(session, int(oi.product_id), -Decimal(str(oi.quantity)), invoice_id=txn.id, movement_type='revert_purchase')
                                 else:
-                                    # previously sale reduced stock -> increase
                                     adjust_stock_delta(session, int(oi.product_id), Decimal(str(oi.quantity)), invoice_id=txn.id, movement_type='revert_sale')
-                        # delete old items
                         session.query(InvoiceItem).filter(InvoiceItem.invoice_id == txn.id).delete()
                         session.commit()
 
-                        # update txn fields
                         txn.invoice_type = invoice_type
                         txn.transaction_date = inv_date
                         txn.document_date = inv_date
@@ -191,7 +175,6 @@ def show():
                         session.refresh(txn)
                         new_txn = txn
                 else:
-                    # create new transaction
                     new_txn = Transaction(
                         transaction_type="income" if sums['grand_total']>=0 else "expense",
                         invoice_type=invoice_type,
@@ -213,7 +196,6 @@ def show():
                     session.commit()
                     session.refresh(new_txn)
 
-                # save invoice items for new_txn
                 for r in st.session_state.invoice_rows:
                     item = InvoiceItem(
                         invoice_id=new_txn.id,
@@ -228,7 +210,6 @@ def show():
                         product_id=r.get('product_id')
                     )
                     session.add(item)
-                    # update product stock and avg cost for purchase items
                     try:
                         from services.product_service import update_purchase_price_and_stock, record_sale_and_reduce_stock
                         pid = r.get('product_id')
@@ -246,18 +227,15 @@ def show():
                 if uploaded_file is not None:
                     save_uploaded_file(uploaded_file, "income", session, transaction_id=new_txn.id)
 
-                # clear editing state
                 if editing_id:
                     st.session_state.pop('editing_invoice_id', None)
 
                 st.success("Fatura kaydedildi ve kalemler ilişkilendirildi.")
-                # reset rows
                 st.session_state.invoice_rows = []
                 st.experimental_rerun()
         except Exception as e:
             st.error(f"Fatura kaydederken hata: {e}")
 
-    # existing documents list
     st.markdown("---")
     st.subheader("Yüklenmiş Belgeler")
     docs = session.query(Document).order_by(Document.uploaded_at.desc()).limit(100).all()
@@ -286,7 +264,6 @@ def show():
 
     session.close()
 
-    # Invoice listing with filters and export
     Session2 = sessionmaker(bind=engine)
     s2 = Session2()
     st.markdown("---")
@@ -318,7 +295,6 @@ def show():
         })
     df = pd.DataFrame(data)
     st.dataframe(df)
-    # deletion flow
     for r in rows:
         cols = st.columns([6,1,1,1])
         with cols[0]:
@@ -335,7 +311,6 @@ def show():
         with cols[3]:
             st.download_button("İndir", data=str(r.grand_total).encode('utf-8'), file_name=f"invoice_{r.id}.txt")
 
-    # confirm delete
     if st.session_state.get('delete_candidate'):
         cid = st.session_state.get('delete_candidate')
         st.warning(f"Fatura {st.session_state.get('delete_candidate_num')} silinecek. Onaylıyor musunuz?")

@@ -5,7 +5,7 @@ from database.models import Product
 from decimal import Decimal
 
 
-def show():
+def render_products():
     st.header("Ürünler")
     Session = sessionmaker(bind=engine)
     session = Session()
