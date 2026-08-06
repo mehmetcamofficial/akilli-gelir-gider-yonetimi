@@ -80,6 +80,8 @@ class DocumentReconciliation(Base):
     reviewed_at = Column(DateTime, nullable=True)
 
 
+<<<<<<< HEAD
+=======
 class ReconciliationDocument(Base):
     __tablename__ = "reconciliation_documents"
     id = Column(Integer, primary_key=True)
@@ -130,6 +132,7 @@ class ReconciliationApproval(Base):
     approved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+>>>>>>> origin/main
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True)
@@ -140,6 +143,8 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+<<<<<<< HEAD
+=======
 class ImportBatch(Base):
     __tablename__ = "import_batches"
     id = Column(Integer, primary_key=True)
@@ -168,6 +173,7 @@ class BankTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+>>>>>>> origin/main
 class InvoiceItem(Base):
     __tablename__ = "invoice_items"
     id = Column(Integer, primary_key=True)

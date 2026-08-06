@@ -24,7 +24,10 @@ from views.control_center import render_control_center
 from views.settings import render_settings
 from views.drive_import import render_drive_import
 from views.document_reconciliation import render_document_reconciliation
+<<<<<<< HEAD
+=======
 from views.management_analytics import render_management_analytics
+>>>>>>> origin/main
 
 
 def main():
@@ -45,7 +48,11 @@ def main():
             ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri"]),
             ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
+<<<<<<< HEAD
+            ("Analiz & Rapor", ["Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Belge Mutabakatı", "Kontrol Merkezi", "Ayarlar"]),
+=======
             ("Rapor ve Analiz", ["Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Belge Mutabakatı", "Kontrol Merkezi", "Ayarlar"]),
+>>>>>>> origin/main
         ]
     )
 
