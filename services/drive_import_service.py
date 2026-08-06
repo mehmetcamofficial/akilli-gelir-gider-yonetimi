@@ -1,5 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
 import pandas as pd
 
 COLUMN_MAP = {
@@ -49,6 +51,67 @@ PAYMENT_STATUS_MAP = {
     "beklemede": "Beklemede",
     "iptal": "İptal",
 }
+
+
+class ExcelImportService:
+    @staticmethod
+    def get_sheet_names(file_bytes, filename):
+        extension = Path(filename).suffix.lower()
+        if extension == ".csv":
+            return ["CSV"]
+        engine = "xlrd" if extension == ".xls" else "openpyxl"
+        return pd.ExcelFile(BytesIO(file_bytes), engine=engine).sheet_names
+
+    @staticmethod
+    def load_dataframe(file_bytes, filename, sheet_name=None):
+        extension = Path(filename).suffix.lower()
+        if extension == ".csv":
+            return pd.read_csv(BytesIO(file_bytes))
+        engine = "xlrd" if extension == ".xls" else "openpyxl"
+        return pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine=engine)
+
+
+class ColumnMappingService:
+    ALIASES = {
+        "transaction_date": ["tarih", "işlem tarihi", "belge tarihi"],
+        "due_date": ["vade tarihi", "ödeme tarihi"],
+        "description": ["açıklama", "not"],
+        "currency": ["para birimi", "döviz", "currency"],
+        "income": ["gelir"],
+        "expense": ["gider"],
+        "party_name": ["müşteri", "tedarikçi", "firma", "taraf"],
+        "transaction_type": ["işlem türü", "tür", "type"],
+        "invoice_number": ["fatura", "belge no", "invoice"],
+        "booking_number": ["rezervasyon", "booking"],
+        "tour": ["tur"],
+        "grand_total": ["tutar", "toplam", "genel toplam"],
+        "tax_total": ["kdv", "vergiler", "vergi"],
+        "payment_status": ["ödeme durumu", "tahsilat durumu", "durum"],
+    }
+
+    @classmethod
+    def guess(cls, columns, field_keys):
+        mapping = {}
+        normalized = [(column, normalize_column_name(column) or "") for column in columns]
+        for field_key in field_keys:
+            mapping[field_key] = "<Boş>"
+            for column, name in normalized:
+                if name == field_key or any(alias in name for alias in cls.ALIASES.get(field_key, [])):
+                    mapping[field_key] = column
+                    break
+        return mapping
+
+
+class DuplicateCheckService:
+    @staticmethod
+    def transaction_exists(session, transaction_model, row):
+        invoice_number = row.get("invoice_number")
+        if not invoice_number:
+            return False
+        return session.query(transaction_model).filter(
+            transaction_model.invoice_number == invoice_number,
+            transaction_model.party_name == row.get("party_name"),
+        ).first() is not None
 
 
 def normalize_column_name(name):
