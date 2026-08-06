@@ -119,6 +119,9 @@ def render_bookings():
         for b in bookings:
             st.write(f"{b.booking_number} | {b.booking_status} | {b.service_start_date.date() if b.service_start_date else '-'} | Toplam: {b.grand_total:,.2f} ₺")
     else:
-        st.info("Henüz rezervasyon yok.")
+        empty_state(
+            "Rezervasyon bulunamadı",
+            "Rezervasyon ekleyerek acente operasyonunuzu izleyebilir ve raporları doldurabilirsiniz.",
+        )
 
     session.close()

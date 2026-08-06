@@ -1,9 +1,10 @@
 import streamlit as st
+import urllib.parse
 
-BASE_BACKGROUND = "#eef2ff"
+BASE_BACKGROUND = "#f5f7fb"
 CARD_BACKGROUND = "#ffffff"
 CARD_BORDER = "1px solid rgba(15, 23, 42, 0.08)"
-SHADOW = "0 18px 45px rgba(15, 23, 42, 0.08)"
+SHADOW = "0 14px 35px rgba(15, 23, 42, 0.07)"
 PRIMARY_COLOR = "#0c4a6e"
 SECONDARY_COLOR = "#0ea5e9"
 SUCCESS_COLOR = "#16a34a"
@@ -12,7 +13,7 @@ DANGER_COLOR = "#dc2626"
 INFO_COLOR = "#2563eb"
 TEXT_COLOR = "#0f172a"
 MUTED_COLOR = "#475569"
-BORDER_RADIUS = "20px"
+BORDER_RADIUS = "16px"
 
 
 def inject_styles():
@@ -183,12 +184,58 @@ def inject_styles():
         }}
         .empty-state-button {{
             display: inline-block;
-            padding: 0.75rem 1.15rem;
+            padding: 0.85rem 1.25rem;
             border-radius: 999px;
             background: {SECONDARY_COLOR};
             color: #fff;
             text-decoration: none;
             font-weight: 700;
+        }}
+        .quick-action-card {{
+            display: block;
+            padding: 1.1rem 1rem;
+            border-radius: 18px;
+            border: {CARD_BORDER};
+            background: {CARD_BACKGROUND};
+            box-shadow: {SHADOW};
+            color: {TEXT_COLOR};
+            text-decoration: none;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }}
+        .quick-action-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 22px 45px rgba(15, 23, 42, 0.10);
+        }}
+        .quick-action-icon {{
+            font-size: 1.45rem;
+            margin-bottom: 0.75rem;
+        }}
+        .quick-action-title {{
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }}
+        .quick-action-help {{
+            font-size: 0.92rem;
+            color: {MUTED_COLOR};
+            line-height: 1.5;
+        }}
+        .action-button {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 0.95rem 1.1rem;
+            border-radius: 14px;
+            background: {SECONDARY_COLOR};
+            color: #fff;
+            font-weight: 700;
+            text-decoration: none;
+            text-align: center;
+            transition: background 0.2s ease;
+        }}
+        .action-button:hover {{
+            background: #0b82c6;
         }}
         .table-container {{
             overflow-x: auto;
@@ -252,7 +299,7 @@ def sidebar_brand():
         """
         <div class='brand-box'>
             <div class='brand-title'>Seyahat Acentası Finans ve Operasyon</div>
-            <div class='brand-subtitle'>Muhasebe, Rezervasyon ve Kârlılık Yönetimi</div>
+            <div class='brand-subtitle'>Rezervasyon, gelir-gider, tahsilat ve kârlılık yönetimi</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -260,27 +307,73 @@ def sidebar_brand():
 
 
 def sidebar_menu(menu_groups):
-    if "selected_page" not in st.session_state:
-        st.session_state.selected_page = menu_groups[0][1][0]
+    selected_page = st.query_params.get("page")
+    if not selected_page:
+        selected_page = menu_groups[0][1][0]
 
-    def _set_selected(key):
-        st.session_state.selected_page = st.session_state[key]
-
+    nav_html = ["<div class='sidebar-nav'>"]
     for group_title, options in menu_groups:
-        st.sidebar.markdown(f"<div class='sidebar-group-title'>{group_title}</div>", unsafe_allow_html=True)
-        st.sidebar.radio(
-            "",
-            options,
-            index=options.index(st.session_state.selected_page) if st.session_state.selected_page in options else 0,
-            key=f"menu_{group_title}",
-            on_change=_set_selected,
-            args=(f"menu_{group_title}",),
+        nav_html.append(f"<div class='sidebar-group-title'>{group_title}</div>")
+        for option in options:
+            active = option == selected_page
+            page_param = urllib.parse.quote_plus(option)
+            icon = "🟢" if active else "▫️"
+            nav_html.append(
+                f"<a class='sidebar-nav-item{' active' if active else ''}' href='?page={page_param}'>"
+                f"<span class='sidebar-nav-icon'>{icon}</span>"
+                f"<span class='sidebar-nav-text'>{option}</span>"
+                f"</a>"
+            )
+    nav_html.append("</div>")
+
+    st.sidebar.markdown("""
+        <style>
+        .sidebar-nav { display: grid; gap: 0.45rem; }
+        .sidebar-nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 0.95rem; border-radius: 14px; text-decoration: none; color: #1f2937; background: rgba(255,255,255,0.88); border: 1px solid transparent; transition: all 0.2s ease; }
+        .sidebar-nav-item:hover { background: rgba(14,165,233,0.12); border-color: rgba(14,165,233,0.18); }
+        .sidebar-nav-item.active { background: rgba(14,165,233,0.12); border-color: #0c4a6e; color: #0c4a6e; font-weight: 700; }
+        .sidebar-nav-icon { width: 1.35rem; display: inline-flex; justify-content: center; }
+        .sidebar-nav-text { flex: 1; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown("".join(nav_html), unsafe_allow_html=True)
+    return selected_page
+
+
+def render_quick_action_cards(actions, columns=3):
+    cols = st.columns(columns, gap="large")
+    for index, action in enumerate(actions):
+        with cols[index % columns]:
+            st.markdown(
+                f"""
+                <a class='quick-action-card' href='?page={urllib.parse.quote_plus(action['page'])}'>
+                    <div class='quick-action-icon'>{action.get('icon','⚡')}</div>
+                    <div class='quick-action-title'>{action['label']}</div>
+                    <div class='quick-action-help'>{action.get('help','')}</div>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def action_button(label, page=None, icon=None):
+    if page:
+        href = f"?page={urllib.parse.quote_plus(page)}"
+        st.markdown(
+            f"""
+            <a class='action-button' href='{href}'>
+                <span>{icon or '➕'} {label}</span>
+            </a>
+            """,
+            unsafe_allow_html=True,
         )
-    return st.session_state.selected_page
+    else:
+        return st.button(label)
 
 
-def page_header(title, subtitle, action_label=None, action_key=None):
-    cols = st.columns([3.5, 1], gap="large")
+def page_header(title, subtitle, action_label=None, action_page=None):
+    cols = st.columns([4, 1], gap="large")
     with cols[0]:
         st.markdown(
             f"""
@@ -292,9 +385,9 @@ def page_header(title, subtitle, action_label=None, action_key=None):
             unsafe_allow_html=True,
         )
     with cols[1]:
-        if action_label:
-            return st.button(action_label, key=action_key or title, help=f"{action_label} oluştur")
-    return False
+        if action_label and action_page:
+            action_button(action_label, page=action_page, icon="➕")
+    return None
 
 
 def section_header(title, description=None):

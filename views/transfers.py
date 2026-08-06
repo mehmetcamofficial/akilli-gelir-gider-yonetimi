@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Transfer, Booking, Tour, Supplier
+from utils.ui import empty_state
 
 
 def render_transfers():
@@ -91,6 +92,9 @@ def render_transfers():
         for t in transfers:
             st.write(f"{t.id} | {t.transfer_type or '-'} | {t.pickup_location or '-'} → {t.dropoff_location or '-'} | Yolcu: {t.passenger_count} | Durum: {t.operation_status or '-'}")
     else:
-        st.info("Henüz transfer kaydı yok.")
+        empty_state(
+            "Transfer kaydı yok",
+            "Transfer planlaması ve maliyet kayıtları için yeni transfer bilgisi ekleyin.",
+        )
 
     session.close()

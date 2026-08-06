@@ -1,132 +1,118 @@
-import json
-from pathlib import Path
-
 import streamlit as st
 from database.migrations import delete_demo_data, restore_demo_data
-from services.google_drive_service import create_drive_service, list_drive_excel_files
-
-LOCAL_CONFIG_PATH = Path(".streamlit/drive_local_secrets.json")
-
-
-def _load_local_config():
-    if LOCAL_CONFIG_PATH.exists():
-        try:
-            return json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_local_config(config):
-    LOCAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOCAL_CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _remove_local_config():
-    if LOCAL_CONFIG_PATH.exists():
-        LOCAL_CONFIG_PATH.unlink()
-
-
-def _read_json_input(json_input):
-    if not json_input:
-        return None
-    if isinstance(json_input, dict):
-        return json_input
-    try:
-        return json.loads(json_input)
-    except Exception:
-        return None
+from services.google_drive_config import (
+    clear_drive_config,
+    get_drive_folder_id,
+    get_service_account_info,
+    has_valid_drive_config,
+    initialize_drive_state,
+    list_drive_files,
+    save_drive_config,
+)
 
 
 def render_settings():
     st.header("Ayarlar")
     st.write("Uygulama ayarlarını ve Google Drive bağlantısını bu ekrandan yönetin.")
 
-    local_config = _load_local_config()
-    stored_json = local_config.get("service_account_json", "")
-    stored_folder_id = local_config.get("folder_id", "")
+    initialize_drive_state()
 
     st.markdown("## Google Drive Bağlantısı")
     st.write(
-        "Aşağıda Google Drive bağlantısını yerel olarak kaydedebilir veya Streamlit Cloud'da `st.secrets` üzerinden sağlayabilirsiniz."
+        "Google Drive bağlantısını ayarlamak için servis hesabı JSON dosyanızı yükleyin, klasör ID'sini girin ve bağlantıyı test edin."
     )
 
-    col1, col2 = st.columns([3, 1], gap="large")
+    col1, col2, col3 = st.columns([3, 2, 2], gap="large")
     with col1:
-        drive_json_file = st.file_uploader(
+        uploaded_file = st.file_uploader(
             "Servis Hesabı JSON Yükle",
             type=["json"],
-            help="Servis hesabı JSON dosyanızı seçin. Bu dosya yerel olarak `.streamlit/drive_local_secrets.json` içinde saklanacaktır.",
+            help="Servis hesabı JSON dosyanızı seçin. Bu dosya yalnızca oturumda tutulur ve GitHub'a yazılmaz.",
             key="settings_drive_json_file",
         )
-        if drive_json_file is not None:
+        if uploaded_file is not None:
             try:
-                uploaded_json = json.loads(drive_json_file.getvalue().decode("utf-8"))
-                stored_json = uploaded_json
+                save_drive_config(uploaded_file.getvalue().decode("utf-8"))
                 st.success("Servis hesabı JSON başarıyla yüklendi.")
-            except Exception:
-                st.error("Geçerli bir JSON dosyası yükleyin.")
+            except ValueError as exc:
+                st.error(str(exc))
 
-        drive_json_text = st.text_area(
-            "Servis Hesabı JSON",
-            value=json.dumps(stored_json, indent=2, ensure_ascii=False) if stored_json else "",
-            height=220,
-            key="settings_drive_json_text",
-        )
-
-        drive_folder_id = st.text_input(
-            "Drive Klasör ID",
-            value=stored_folder_id,
-            help="Excel dosyalarınızın bulunduğu Google Drive klasörünün ID'sini girin.",
-            key="settings_drive_folder_id",
-        )
+        if get_service_account_info():
+            st.write("**JSON Yükleme Durumu:**")
+            st.write("✓ JSON hazır")
+        else:
+            st.info("Servis hesabı JSON dosyası yükleyin veya Streamlit secrets üzerinden sağlayın.")
 
     with col2:
-        st.markdown("#### Bağlantı Durumu")
-        active = False
-        service = None
-        service_json = _read_json_input(drive_json_text)
-        if service_json and drive_folder_id:
+        folder_id_input = st.text_input(
+            "Drive Klasör ID",
+            value=get_drive_folder_id(),
+            help="Excel dosyalarınızın bulunduğu Google Drive klasörünün ID'sini veya bağlantısını girin.",
+            key="settings_drive_folder_id",
+        )
+        save_drive_config(folder_id=folder_id_input)
+
+    with col3:
+        st.markdown("#### Durum Paneli")
+        current_json = get_service_account_info()
+        folder_id = get_drive_folder_id()
+        checks = []
+        checks.append("✓ JSON hazır" if current_json else "✗ JSON eksik")
+        checks.append("✓ Klasör ID girildi" if folder_id else "✗ Klasör ID eksik")
+        checks.append("✓ Bağlantı başarılı" if st.session_state.gdrive_connected else "✗ Bağlantı henüz test edilmedi")
+        if st.session_state.gdrive_files:
+            checks.append(f"✓ {len(st.session_state.gdrive_files)} dosya bulundu")
+        st.write("\n".join(checks))
+
+    current_json = get_service_account_info()
+    folder_id = get_drive_folder_id()
+
+    if not current_json:
+        st.warning("Google Drive bağlantısı kurulmamış.")
+    elif not folder_id:
+        st.info("Google Drive klasör ID girilmemiş.")
+    elif not st.session_state.gdrive_connected:
+        st.info("Google Drive bilgileri hazır. Bağlantıyı test edin.")
+    else:
+        st.success("Google Drive bağlantısı başarılı. Dosyalar Excel Veri Aktarımı sayfasında hazır." )
+
+    connection_col1, connection_col2, connection_col3 = st.columns([2, 2, 2], gap="large")
+    with connection_col1:
+        if st.button("Bağlantıyı Test Et", disabled=not has_valid_drive_config()):
             try:
-                service = create_drive_service(service_json)
-                _ = list_drive_excel_files(drive_folder_id, service)
-                active = True
-                st.success("Google Drive bağlantısı aktif.")
+                files = list_drive_files()
+                st.success(f"Bağlantı başarılı. {len(files)} dosya bulundu.")
             except Exception as exc:
+                st.session_state.gdrive_connected = False
+                st.session_state.gdrive_connection_error = str(exc)
                 st.error(f"Bağlantı testi başarısız: {exc}")
-        else:
-            st.info("Servis hesabı JSON ve klasör ID gereklidir.")
 
-        st.checkbox("Google Drive Bağlantısı Aktif", value=active, disabled=True)
-        st.write("Streamlit Cloud ortamında servis hesabı bilgisi `st.secrets` üzerinden sağlanmalıdır.")
-
-    if st.button("Bağlantıyı Test Et"):
-        if not service_json:
-            st.error("Önce geçerli bir JSON servis hesabı bilgisi girin.")
-        elif not drive_folder_id:
-            st.error("Önce klasör ID'sini girin.")
-        else:
+    with connection_col2:
+        if st.button("Drive Dosyalarını Yenile", disabled=not has_valid_drive_config()):
             try:
-                service = create_drive_service(service_json)
-                files = list_drive_excel_files(drive_folder_id, service)
-                st.success(f"Bağlantı başarılı. Klasörde {len(files)} Excel dosyası bulundu.")
+                files = list_drive_files()
+                st.success(f"{len(files)} dosya bulundu.")
             except Exception as exc:
-                st.error(f"Bağlantı testi başarısız: {exc}")
+                st.session_state.gdrive_connected = False
+                st.session_state.gdrive_connection_error = str(exc)
+                st.error(f"Drive dosyaları yenilenemedi: {exc}")
 
-    save_col, remove_col = st.columns(2, gap="large")
-    with save_col:
-        if st.button("Bağlantıyı Kaydet"):
-            if not service_json:
-                st.error("Geçerli bir servis hesabı JSON bilgisi sağlayın.")
-            elif not drive_folder_id:
-                st.error("Drive Klasör ID'si gereklidir.")
-            else:
-                _save_local_config({"service_account_json": service_json, "folder_id": drive_folder_id})
-                st.success("Google Drive bağlantısı yerel olarak kaydedildi.")
-    with remove_col:
-        if st.button("Bağlantıyı Kaldır"):
-            _remove_local_config()
-            st.success("Yerel Google Drive bağlantısı kaldırıldı.")
+    with connection_col3:
+        if st.button("Bağlantıyı Temizle"):
+            clear_drive_config()
+            st.success("Oturumdaki Google Drive bağlantısı temizlendi.")
+
+    with st.expander("Bağlantı Özeti", expanded=True):
+        if st.session_state.gdrive_connected:
+            st.write("✓ Bağlantı başarılı")
+            st.write(f"Klasör ID: {folder_id}")
+            st.write(f"Dosya sayısı: {len(st.session_state.gdrive_files)}")
+            if st.session_state.gdrive_connection_error:
+                st.write(f"Uyarı: {st.session_state.gdrive_connection_error}")
+        elif st.session_state.gdrive_connection_error:
+            st.write(f"Bağlantı testi başarısız: {st.session_state.gdrive_connection_error}")
+        else:
+            st.write("Henüz bağlantı testi yapılmadı.")
 
     st.markdown("---")
     st.write("Eğer Streamlit Cloud'da çalışıyorsanız, servis hesabı bilgilerini `st.secrets` içinde saklayın ve buraya yapıştırmayın.")
@@ -135,16 +121,51 @@ def render_settings():
     st.write("Demo verileri temizleyin veya yeniden yükleyin. Bu işlem yalnızca demo kayıtları etkiler.")
 
     with st.expander("Demo Verisi Yönetimi"):
+        result = st.session_state.pop("demo_delete_result", None)
+        if result is not None:
+            if sum(result.values()):
+                st.success("Demo verileri başarıyla silindi.")
+                labels = {
+                    "bookings": "Silinen rezervasyon",
+                    "tours": "Silinen tur",
+                    "customers": "Silinen müşteri",
+                    "suppliers": "Silinen tedarikçi",
+                    "transactions": "Silinen finans işlemi",
+                    "collections": "Silinen tahsilat",
+                    "supplier_payments": "Silinen ödeme",
+                    "documents": "Silinen belge",
+                }
+                columns = st.columns(4)
+                for index, (key, label) in enumerate(labels.items()):
+                    columns[index % 4].metric(label, result.get(key, 0))
+            else:
+                st.info("Silinecek demo verisi bulunamadı.")
+
+        confirmed = st.checkbox(
+            "Demo verilerinin silineceğini onaylıyorum",
+            key="confirm_demo_delete",
+        )
         demo_col1, demo_col2 = st.columns(2)
         with demo_col1:
-            if st.button("Demo Verilerini Sil"):
+            if st.button(
+                "Demo Verilerini Kalıcı Olarak Sil",
+                disabled=not confirmed,
+                type="primary",
+            ):
                 deleted = delete_demo_data()
-                st.success("Demo verileri silindi.")
-                st.json(deleted)
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                for key in list(st.session_state):
+                    if key.startswith(("demo_", "tour_", "booking_", "dashboard_")):
+                        del st.session_state[key]
+                st.session_state.demo_delete_result = deleted
+                st.rerun()
 
         with demo_col2:
             if st.button("Demo Verilerini Geri Yükle"):
                 restore_demo_data()
+                st.cache_data.clear()
+                st.cache_resource.clear()
                 st.success("Demo verileri yeniden yüklendi.")
 
-        st.warning("Uyarı: Bu işlemler demo verisini etkiler, gerçek kayıtlarınızı silmez.")
+        st.warning("Bu işlem geri alınamaz; gerçek kullanıcı kayıtları etkilenmez.")

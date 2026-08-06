@@ -123,7 +123,7 @@ def render_invoices():
     cols_action = st.columns([1,1])
     with cols_action[0]:
         if st.button("Yeni Satır Ekle (Form dışında)", on_click=add_row):
-            st.experimental_rerun()
+            st.rerun()
     with cols_action[1]:
         st.write("")
 
@@ -131,7 +131,7 @@ def render_invoices():
     for i in range(len(st.session_state.invoice_rows)):
         if st.button(f"Satırı Sil {i+1}", key=f"post_del_{i}"):
             remove_row(i)
-            st.experimental_rerun()
+            st.rerun()
 
     if submitted:
         try:
@@ -232,7 +232,7 @@ def render_invoices():
 
                 st.success("Fatura kaydedildi ve kalemler ilişkilendirildi.")
                 st.session_state.invoice_rows = []
-                st.experimental_rerun()
+                st.rerun()
         except Exception as e:
             st.error(f"Fatura kaydederken hata: {e}")
 
@@ -302,12 +302,12 @@ def render_invoices():
         with cols[1]:
             if st.button("Düzenle", key=f"edit_{r.id}"):
                 st.session_state['editing_invoice_id'] = r.id
-                st.experimental_rerun()
+                st.rerun()
         with cols[2]:
             if st.button("Sil", key=f"del_{r.id}"):
                 st.session_state['delete_candidate'] = r.id
                 st.session_state['delete_candidate_num'] = r.invoice_number
-                st.experimental_rerun()
+                st.rerun()
         with cols[3]:
             st.download_button("İndir", data=str(r.grand_total).encode('utf-8'), file_name=f"invoice_{r.id}.txt")
 
@@ -337,11 +337,11 @@ def render_invoices():
             finally:
                 st.session_state.pop('delete_candidate', None)
                 st.session_state.pop('delete_candidate_num', None)
-                st.experimental_rerun()
+                st.rerun()
         if st.button("İptal"):
             st.session_state.pop('delete_candidate', None)
             st.session_state.pop('delete_candidate_num', None)
-            st.experimental_rerun()
+            st.rerun()
     if not df.empty:
         st.download_button("Fatura CSV İndir", data=df.to_csv(index=False).encode('utf-8'), file_name='invoices.csv')
         try:

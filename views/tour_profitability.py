@@ -4,17 +4,23 @@ from sqlalchemy import func
 import pandas as pd
 from database.db import engine
 from database.models import Tour, Booking
+from utils.ui import page_header, section_header, format_currency, empty_state
 
 
 def render_tour_profitability():
-    st.header("Tur Kârlılığı")
+    page_header(
+        "Tur Kârlılığı",
+        "Tur bazında gelir ve kapasite verilerini görselleştirerek kârlılığı net şekilde analiz edin.",
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
 
-    st.subheader("Tur Gelirleri ve Doluluk")
     tours = session.query(Tour).order_by(Tour.name).all()
     if not tours:
-        st.info("Henüz tur kaydı yok.")
+        empty_state(
+            "Tur kaydı yok",
+            "Tur ve rezervasyon verisi girildikçe kârlılık raporları dolacaktır.",
+        )
         session.close()
         return
 
@@ -32,11 +38,15 @@ def render_tour_profitability():
         })
 
     df = pd.DataFrame(tour_rows).sort_values("Gelir", ascending=False)
+    section_header("Tur Kârlılık Tablosu")
     st.dataframe(df)
 
     if not df.empty:
-        st.bar_chart(df.set_index("Tur")["Gelir"])
-        st.bar_chart(df.set_index("Tur")["Doluluk %"])
+        col1, col2 = st.columns(2, gap='large')
+        with col1:
+            st.bar_chart(df.set_index("Tur")["Gelir"])
+        with col2:
+            st.bar_chart(df.set_index("Tur")["Doluluk %"])
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("Tur Kârlılık CSV İndir", data=csv, file_name="tour_profitability.csv", mime="text/csv")
 

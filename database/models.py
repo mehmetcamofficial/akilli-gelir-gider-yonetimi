@@ -38,6 +38,7 @@ class Transaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     documents = relationship("Document", back_populates="transaction")
     items = relationship("InvoiceItem", back_populates="invoice")
 
@@ -53,6 +54,7 @@ class Document(Base):
     file_size = Column(Integer)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
     transaction = relationship("Transaction", back_populates="documents")
 
 
@@ -109,6 +111,7 @@ class SalesChannel(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
 
 
 class Staff(Base):
@@ -120,6 +123,7 @@ class Staff(Base):
     phone = Column(String(100), nullable=True)
     email = Column(String(200), nullable=True)
     notes = Column(Text, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
 
 
 class Customer(Base):
@@ -140,6 +144,7 @@ class Customer(Base):
     tax_number = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
     kvkk_confirmed = Column(Boolean, default=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     bookings = relationship("Booking", back_populates="customer")
 
 
@@ -186,7 +191,11 @@ class Tour(Base):
     excluded_services = Column(Text, nullable=True)
     cancellation_policy = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    status = Column(String(100), default="Taslak")
     is_active = Column(Boolean, default=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     departures = relationship("TourDeparture", back_populates="tour")
     cost_items = relationship("TourCostItem", back_populates="tour")
     bookings = relationship("Booking", back_populates="tour")
@@ -256,6 +265,7 @@ class Booking(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    is_demo = Column(Boolean, default=False, nullable=False)
     passengers = relationship("Passenger", back_populates="booking")
     customer = relationship("Customer", back_populates="bookings")
     bookings_services = relationship("BookingService", back_populates="booking")
@@ -311,6 +321,7 @@ class HotelBooking(Base):
     total_cost = Column(Numeric(18,2), default=Decimal('0.00'))
     cancellation_policy = Column(Text, nullable=True)
     free_cancellation_until = Column(DateTime, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
     booking = relationship("Booking")
     hotel = relationship("Hotel", back_populates="hotel_bookings")
 
@@ -383,6 +394,7 @@ class Collection(Base):
     receipt_number = Column(String(255), nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     notes = Column(Text, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
     booking = relationship("Booking", back_populates="collections")
 
 
@@ -405,6 +417,7 @@ class Supplier(Base):
     contract_start = Column(DateTime, nullable=True)
     contract_end = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
 
 
 class SupplierPayment(Base):
@@ -427,6 +440,7 @@ class SupplierPayment(Base):
     payment_status = Column(String(100), nullable=True)
     document_reference = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
 
 
 class CashAccount(Base):
@@ -505,4 +519,3 @@ class Voucher(Base):
     emergency_contact = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     booking = relationship("Booking", back_populates="vouchers")
-

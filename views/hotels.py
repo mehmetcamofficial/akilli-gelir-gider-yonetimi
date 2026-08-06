@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Hotel
+from utils.ui import empty_state
 
 
 def render_hotels():
@@ -45,6 +46,9 @@ def render_hotels():
         for h in hotels:
             st.write(f"{h.id} - {h.name} | {h.address or '-'} | {h.phone or '-'} | {h.email or '-'}")
     else:
-        st.info("Henüz otel kaydı yok.")
+        empty_state(
+            "Otel kaydı yok",
+            "Konaklama teklifleri ve maliyet hesabı için otel bilgisi ekleyin.",
+        )
 
     session.close()

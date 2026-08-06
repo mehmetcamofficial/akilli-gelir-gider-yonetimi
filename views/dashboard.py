@@ -165,8 +165,8 @@ def render_dashboard():
         st.plotly_chart(fig, use_container_width=True)
     else:
         empty_state(
-            "Veri Bekleniyor",
-            "Aylık satış ve tahsilat grafiği için yeterli veri bulunamadı.",
+            "Veri Yetersiz",
+            "Aylık satış ve tahsilat trendlerini görmek için rezervasyon veya tahsilat kayıtları ekleyin.",
         )
 
     section_header("Tur Performansı ve Tedarikçi Etkisi")
@@ -198,8 +198,8 @@ def render_dashboard():
             st.bar_chart(df_top_tours.rename(columns={'tour': 'Tur', 'bookings': 'Rezervasyon Sayısı'}).set_index('Tur'))
         else:
             empty_state(
-                "Henüz Rezervasyon Yok",
-                "Popüler turlar listesi için rezervasyon kaydı bekleniyor.",
+                "Rezervasyon Verisi Yok",
+                "Popüler turlar raporu için yeni rezervasyon kaydı ekleyin.",
             )
 
     section_header("Acentenin En Önemli Tedarikçileri")

@@ -3,10 +3,16 @@ from datetime import datetime
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Customer
+from utils.ui import page_header, section_header, empty_state
 
 
 def render_customers():
-    st.header("Müşteriler ve Yolcular")
+    page_header(
+        "Müşteriler ve Yolcular",
+        "Müşteri ve yolcu kayıtlarını finansal süreçlerle ilişkilendirerek operasyonel netlik sağlayın.",
+        action_label="Yeni Müşteri Ekle",
+        action_page="Müşteriler ve Yolcular",
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -60,6 +66,9 @@ def render_customers():
         for c in customers:
             st.write(f"{c.id} - {c.first_name} {c.last_name or ''} | {c.email or '-'} | {c.phone or '-'} | {c.nationality or '-'}")
     else:
-        st.info("Henüz müşteri kaydı yok.")
+        empty_state(
+            "Müşteri kaydı yok",
+            "Yeni müşteri ekleyerek rezervasyon ve muhasebe süreçlerinizi hızlıca başlatabilirsiniz.",
+        )
 
     session.close()

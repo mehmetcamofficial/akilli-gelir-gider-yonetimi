@@ -4,10 +4,17 @@ from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Collection, Booking, Customer, Staff
+from utils.ui import page_header, section_header, format_currency, format_date, empty_state
 
 
 def render_collections():
-    st.header("Tahsilatlar")
+    page_header(
+        "Tahsilatlar",
+        "Müşteri tahsilatlarını, vade durumlarını ve kasa girişlerini hızlıca kaydedin.",
+        action_label="Yeni Tahsilat",
+        action_page="Tahsilatlar",
+    )
+
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -23,16 +30,19 @@ def render_collections():
     staff_options.update({f"{s.id}": f"{s.first_name} {s.last_name}" for s in staff})
 
     with st.form("collection_form"):
-        booking_choice = st.selectbox("Rezervasyon", list(booking_options.values()), format_func=lambda x: x or "-")
-        customer_choice = st.selectbox("Müşteri", list(customer_options.values()), format_func=lambda x: x or "-")
-        collection_date = st.date_input("Tahsilat Tarihi", value=date.today())
-        amount = st.number_input("Tutar", min_value=0.0, value=0.0, step=0.1)
-        currency = st.text_input("Para Birimi", value="TRY")
-        payment_method = st.text_input("Ödeme Yöntemi", value="Nakit")
-        account_name = st.text_input("Hesap Adı", value="Kasa")
-        transaction_reference = st.text_input("İşlem Referansı")
-        receipt_number = st.text_input("Makbuz No")
-        staff_choice = st.selectbox("Sorumlu Personel", list(staff_options.values()), format_func=lambda x: x or "-")
+        col1, col2 = st.columns(2, gap='large')
+        with col1:
+            booking_choice = st.selectbox("Rezervasyon", list(booking_options.values()), format_func=lambda x: x or "-")
+            collection_date = st.date_input("Tahsilat Tarihi", value=date.today())
+            amount = st.number_input("Tutar", min_value=0.0, value=0.0, step=0.1)
+            currency = st.text_input("Para Birimi", value="TRY")
+            payment_method = st.text_input("Ödeme Yöntemi", value="Nakit")
+        with col2:
+            customer_choice = st.selectbox("Müşteri", list(customer_options.values()), format_func=lambda x: x or "-")
+            account_name = st.text_input("Hesap Adı", value="Kasa")
+            transaction_reference = st.text_input("İşlem Referansı")
+            receipt_number = st.text_input("Makbuz No")
+            staff_choice = st.selectbox("Sorumlu Personel", list(staff_options.values()), format_func=lambda x: x or "-")
         notes = st.text_area("Notlar")
         submitted = st.form_submit_button("Tahsilat Kaydet")
 
@@ -76,9 +86,29 @@ def render_collections():
     st.subheader("Son Tahsilatlar")
     collections = session.query(Collection).order_by(Collection.collection_date.desc()).limit(30).all()
     if collections:
+        section_header("Son 30 Tahsilat")
+        st.markdown("<div class='table-container'>", unsafe_allow_html=True)
+        st.markdown(
+            "<table><thead><tr><th>Tarih</th><th>Müşteri</th><th>Tutar</th><th>Hesap</th><th>Yöntem</th><th>Referans</th></tr></thead><tbody>",
+            unsafe_allow_html=True,
+        )
         for c in collections:
-            st.write(f"{c.collection_date.date()} | {c.amount:,.2f} {c.currency} | {c.payment_method} | {c.account_name}")
+            customer_name = next((f"{cust.first_name} {cust.last_name}" for cust in customers if cust.id == c.customer_id), '-')
+            st.markdown(
+                f"<tr><td>{format_date(c.collection_date)}</td>"
+                f"<td>{customer_name}</td>"
+                f"<td>{format_currency(c.amount_in_tl)}</td>"
+                f"<td>{c.account_name or '-'}</td>"
+                f"<td>{c.payment_method or '-'}</td>"
+                f"<td>{c.transaction_reference or '-'}</td></tr>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("</tbody></table>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.info("Henüz tahsilat kaydı yok.")
+        empty_state(
+            "Tahsilat kaydı yok",
+            "Kayıtlı tahsilat bulunamadı. Yeni tahsilat ekleyerek muhasebe akışınızı güncelleyin.",
+        )
 
     session.close()
