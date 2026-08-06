@@ -117,16 +117,29 @@ def show():
                     tax_amt = Decimal('0.00')
                 row['tax_amount'] = float(tax_amt)
                 st.write(f"KDV Tutarı: {tax_amt:.2f}")
-            if st.button(f"Satırı Sil {i+1}", key=f"del_{i}"):
-                remove_row(i)
-                st.experimental_rerun()
+            # row delete button moved outside the form to avoid Streamlit form API errors
 
-        st.button("Yeni Satır Ekle", on_click=add_row)
+        # add row button moved outside the form
 
         uploaded_file = st.file_uploader("Fatura Belgesi (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"]) 
         grand_total_input = st.number_input("Genel Toplam (Elle gir, yoksa 0)", min_value=0.0, value=0.0, step=0.01)
 
         submitted = st.form_submit_button("Fatura Kaydet")
+
+    # Row actions (outside the form to avoid using st.button inside st.form)
+    st.markdown("---")
+    cols_action = st.columns([1,1])
+    with cols_action[0]:
+        if st.button("Yeni Satır Ekle (Form dışında)", on_click=add_row):
+            st.experimental_rerun()
+    with cols_action[1]:
+        st.write("")
+
+    # individual delete buttons for each row
+    for i in range(len(st.session_state.invoice_rows)):
+        if st.button(f"Satırı Sil {i+1}", key=f"post_del_{i}"):
+            remove_row(i)
+            st.experimental_rerun()
 
     if submitted:
         try:
