@@ -305,6 +305,55 @@ def show():
         })
     df = pd.DataFrame(data)
     st.dataframe(df)
+    # deletion flow
+    for r in rows:
+        cols = st.columns([6,1,1,1])
+        with cols[0]:
+            st.write(f"{r.transaction_date.date() if hasattr(r.transaction_date,'date') else r.transaction_date} | {r.party_name} | {r.invoice_number} | {r.grand_total}")
+        with cols[1]:
+            if st.button("Düzenle", key=f"edit_{r.id}"):
+                st.session_state['editing_invoice_id'] = r.id
+                st.experimental_rerun()
+        with cols[2]:
+            if st.button("Sil", key=f"del_{r.id}"):
+                st.session_state['delete_candidate'] = r.id
+                st.session_state['delete_candidate_num'] = r.invoice_number
+                st.experimental_rerun()
+        with cols[3]:
+            st.download_button("İndir", data=str(r.grand_total).encode('utf-8'), file_name=f"invoice_{r.id}.txt")
+
+    # confirm delete
+    if st.session_state.get('delete_candidate'):
+        cid = st.session_state.get('delete_candidate')
+        st.warning(f"Fatura {st.session_state.get('delete_candidate_num')} silinecek. Onaylıyor musunuz?")
+        if st.button("Onayla, Sil"):
+            try:
+                txn_del = s2.query(Transaction).filter(Transaction.id == int(cid)).first()
+                if txn_del:
+                    items_del = s2.query(InvoiceItem).filter(InvoiceItem.invoice_id == txn_del.id).all()
+                    from services.product_service import adjust_stock_delta
+                    for oi in items_del:
+                        if oi.product_id:
+                            if txn_del.invoice_type == 'purchase':
+                                adjust_stock_delta(s2, int(oi.product_id), -Decimal(str(oi.quantity)), invoice_id=txn_del.id, movement_type='delete_purchase')
+                            else:
+                                adjust_stock_delta(s2, int(oi.product_id), Decimal(str(oi.quantity)), invoice_id=txn_del.id, movement_type='delete_sale')
+                    txn_del.is_deleted = True
+                    s2.add(txn_del)
+                    s2.commit()
+                    st.success('Fatura silindi (yumuşak silme). Stok düzeltildi.')
+                else:
+                    st.error('Silinecek fatura bulunamadı.')
+            except Exception as e:
+                st.error(f'Silme sırasında hata: {e}')
+            finally:
+                st.session_state.pop('delete_candidate', None)
+                st.session_state.pop('delete_candidate_num', None)
+                st.experimental_rerun()
+        if st.button("İptal"):
+            st.session_state.pop('delete_candidate', None)
+            st.session_state.pop('delete_candidate_num', None)
+            st.experimental_rerun()
     if not df.empty:
         st.download_button("Fatura CSV İndir", data=df.to_csv(index=False).encode('utf-8'), file_name='invoices.csv')
         try:
