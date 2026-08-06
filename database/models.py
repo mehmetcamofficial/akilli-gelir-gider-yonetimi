@@ -72,3 +72,33 @@ class InvoiceItem(Base):
     additional_cost = Column(Numeric(18,2), default=Decimal('0.00'))
     net_cost = Column(Numeric(18,2), default=Decimal('0.00'))
     invoice = relationship("Transaction", back_populates="items")
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(100), nullable=True)
+    barcode = Column(String(100), nullable=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(200), nullable=True)
+    brand = Column(String(200), nullable=True)
+    unit = Column(String(50), default="ad")
+    default_tax_rate = Column(Numeric(5,2), default=Decimal('18.00'))
+    last_purchase_price = Column(Numeric(18,4), default=Decimal('0.00'))
+    avg_purchase_price = Column(Numeric(18,4), default=Decimal('0.00'))
+    last_sale_price = Column(Numeric(18,4), default=Decimal('0.00'))
+    min_sale_price = Column(Numeric(18,4), default=Decimal('0.00'))
+    stock = Column(Numeric(18,4), default=Decimal('0.00'))
+    min_stock = Column(Numeric(18,4), default=Decimal('0.00'))
+    is_active = Column(Boolean, default=True)
+
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, nullable=False)
+    qty = Column(Numeric(18,4), default=Decimal('0.00'))
+    movement_type = Column(String(50))  # 'in' or 'out'
+    related_invoice_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+

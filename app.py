@@ -6,7 +6,7 @@ from pages import dashboard, income_expense, invoices
 def main():
     st.set_page_config(page_title="Gelir-Gider ve Akıllı Fatura Yönetim Sistemi", layout="wide")
     st.sidebar.title("Gelir-Gider ve Fatura Sistemi")
-    menu = ["Genel Bakış", "Gelir & Gider", "Faturalar"]
+    menu = ["Genel Bakış", "Gelir & Gider", "Faturalar", "Ürünler"]
     choice = st.sidebar.selectbox("Menü", menu)
 
     init_db()  # ensure DB and demo data exist on first run
@@ -17,6 +17,9 @@ def main():
         income_expense.show()
     elif choice == "Faturalar":
         invoices.show()
+    elif choice == "Ürünler":
+        from pages import products
+        products.show()
 
 
 if __name__ == "__main__":

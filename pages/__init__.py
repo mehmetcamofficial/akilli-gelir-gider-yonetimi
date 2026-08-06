@@ -1,1 +1,2 @@
-from . import dashboard, income_expense, invoices
+from . import dashboard, income_expense, invoices, products
+

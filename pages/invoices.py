@@ -31,6 +31,13 @@ def show():
 
     st.subheader("Yeni Fatura Oluştur")
     _init_rows()
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    # prepare product list
+    products = session.query(__import__('database').models.Product).order_by(__import__('database').models.Product.name).all()
+    product_options = {str(p.id): f"{p.name} (Stok: {p.stock})" for p in products}
+
     with st.form("invoice_form"):
         inv_date = st.date_input("Fatura Tarihi")
         due_date = st.date_input("Vade Tarihi")
@@ -43,6 +50,17 @@ def show():
             cols = st.columns([3,1,1,1,1,1,1])
             with cols[0]:
                 row["description"] = st.text_input(f"Açıklama {i+1}", value=row.get("description", ""), key=f"desc_{i}")
+                # product selector
+                prod_choice = st.selectbox(f"Ürün {i+1}", options=["-" ] + list(product_options.values()), key=f"prod_{i}")
+                # map back selected product id
+                selected_pid = None
+                if prod_choice and prod_choice != "-":
+                    # find id by matching value
+                    for pid, label in product_options.items():
+                        if label == prod_choice:
+                            selected_pid = int(pid)
+                            break
+                row['product_id'] = selected_pid
             with cols[1]:
                 row["quantity"] = st.number_input(f"Adet {i+1}", min_value=0.0, value=float(row.get("quantity",1)), step=1.0, key=f"qty_{i}")
             with cols[2]:
@@ -107,9 +125,24 @@ def show():
                         discount_amount=Decimal(str(r.get('discount_amount',0))),
                         additional_cost=Decimal(str(r.get('additional_cost',0))),
                         tax_amount=Decimal(str(r.get('tax_amount',0))),
-                        line_total=(Decimal(str(r.get('quantity',0))) * Decimal(str(r.get('unit_price',0))) - Decimal(str(r.get('discount_amount',0))) + Decimal(str(r.get('additional_cost',0))))
+                        line_total=(Decimal(str(r.get('quantity',0))) * Decimal(str(r.get('unit_price',0))) - Decimal(str(r.get('discount_amount',0))) + Decimal(str(r.get('additional_cost',0)))),
+                        product_id=r.get('product_id')
                     )
                     session.add(item)
+                    # update product stock and avg cost for purchase items
+                    try:
+                        from services.product_service import update_purchase_price_and_stock, record_sale_and_reduce_stock
+                        pid = r.get('product_id')
+                        qty = Decimal(str(r.get('quantity',0)))
+                        unit_price = Decimal(str(r.get('unit_price',0)))
+                        if pid:
+                            # infer type: income -> sale (reduce stock); expense -> purchase (increase stock)
+                            if txn.transaction_type == 'income':
+                                record_sale_and_reduce_stock(session, int(pid), qty, invoice_id=txn.id)
+                            else:
+                                update_purchase_price_and_stock(session, int(pid), qty, unit_price, invoice_id=txn.id)
+                    except Exception:
+                        pass
                 session.commit()
 
                 if uploaded_file is not None:
