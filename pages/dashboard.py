@@ -1,9 +1,9 @@
 import streamlit as st
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import func
+from sqlalchemy import func, text
 from database.db import engine
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
@@ -15,7 +15,7 @@ import services.reporting_service as reporting_service
 def _load_transactions():
     Session = sessionmaker(bind=engine)
     session = Session()
-    rows = session.execute("SELECT id, transaction_type, transaction_date, grand_total FROM transactions WHERE is_deleted=0").fetchall()
+    rows = session.execute(text("SELECT id, transaction_type, transaction_date, grand_total FROM transactions WHERE is_deleted=0")).fetchall()
     session.close()
     if not rows:
         return pd.DataFrame(columns=["id","transaction_type","transaction_date","grand_total"])
@@ -68,12 +68,12 @@ def show():
         try:
             SessionLocal = sessionmaker(bind=engine)
             sess_pdf = SessionLocal()
-                if not df.empty:
-                    smin = df.transaction_date.min().date()
-                    smax = df.transaction_date.max().date()
-                    logo_path = 'assets/logo_iglesias_tour_turkey.png'
-                    pdf_bytes = reporting_service.generate_invoice_list_pdf(sess_pdf, smin, smax, logo_path=logo_path)
-                    st.download_button("Fatura Listesi PDF İndir", data=pdf_bytes, file_name="transactions.pdf", mime="application/pdf")
+            if not df.empty:
+                smin = df.transaction_date.min().date()
+                smax = df.transaction_date.max().date()
+                logo_path = 'assets/logo_iglesias_tour_turkey.png'
+                pdf_bytes = reporting_service.generate_invoice_list_pdf(sess_pdf, smin, smax, logo_path=logo_path)
+                st.download_button("Fatura Listesi PDF İndir", data=pdf_bytes, file_name="transactions.pdf", mime="application/pdf")
             sess_pdf.close()
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
@@ -215,5 +215,70 @@ def show():
             st.info('Ödeme durumu verisi yok.')
     except Exception as e:
         st.error(f'Ödeme durumu hesaplanırken hata: {e}')
+    except Exception as e:
+        st.error(f'Ödeme durumu hesaplanırken hata: {e}')
+
+    # Detailed cashflow forecast
+    st.subheader('Nakit Akışı Tahmini (Gelişmiş)')
+    col1, col2 = st.columns([1,2])
+    with col1:
+        horizon = st.selectbox('Tahmin süresi (gün)', [7, 15, 30, 60, 90], index=2)
+        agg = st.selectbox('Aggregrasyon', ['Günlük', 'Haftalık', 'Aylık'])
+    today = date.today()
+    end_forecast = today + timedelta(days=horizon)
+    try:
+        qf = s.query(Transaction).filter(Transaction.is_deleted==False).filter(Transaction.due_date != None).filter(Transaction.due_date >= today).filter(Transaction.due_date <= end_forecast).all()
+        if qf:
+            cf_rows = []
+            for t in qf:
+                amt = float(t.remaining_amount or t.grand_total or 0)
+                if t.transaction_type == 'income':
+                    cf_rows.append({'date': t.due_date, 'flow': amt, 'direction': 'inflow'})
+                else:
+                    cf_rows.append({'date': t.due_date, 'flow': amt, 'direction': 'outflow'})
+            df_cf = pd.DataFrame(cf_rows)
+            df_cf['date'] = pd.to_datetime(df_cf['date'])
+            if agg == 'Günlük':
+                df_agg = df_cf.groupby(['date','direction']).agg({'flow':'sum'}).reset_index()
+                df_pivot = df_agg.pivot(index='date', columns='direction', values='flow').fillna(0)
+            elif agg == 'Haftalık':
+                df_cf['week'] = df_cf['date'].dt.to_period('W').apply(lambda r: r.start_time)
+                df_agg = df_cf.groupby(['week','direction']).agg({'flow':'sum'}).reset_index()
+                df_pivot = df_agg.pivot(index='week', columns='direction', values='flow').fillna(0)
+            else:
+                df_cf['month'] = df_cf['date'].dt.to_period('M').apply(lambda r: r.start_time)
+                df_agg = df_cf.groupby(['month','direction']).agg({'flow':'sum'}).reset_index()
+                df_pivot = df_agg.pivot(index='month', columns='direction', values='flow').fillna(0)
+
+            df_pivot['net'] = df_pivot.get('inflow', 0) - df_pivot.get('outflow', 0)
+            st.area_chart(df_pivot.fillna(0))
+            st.dataframe(df_pivot)
+            st.download_button('Nakit Tahmini CSV İndir', data=df_pivot.reset_index().to_csv(index=False).encode('utf-8'), file_name='cashflow_forecast.csv')
+        else:
+            st.info('Seçilen dönem için vadesi gelen işlem bulunamadı.')
+    except Exception as e:
+        st.error(f'Nakit tahmini hesaplanırken hata: {e}')
+
+    # Payment due alerts
+    st.subheader('Ödeme Vadesi Uyarıları')
+    try:
+        days_ahead = st.number_input('Kaç gün içindeki vadeleri göster?', min_value=1, max_value=365, value=14)
+        warn_date = date.today() + timedelta(days=days_ahead)
+        Session3 = sessionmaker(bind=engine)
+        sess3 = Session3()
+        due_q = sess3.query(Transaction).filter(Transaction.is_deleted==False).filter(Transaction.due_date != None).filter(Transaction.due_date <= warn_date).filter((Transaction.payment_status != 'paid') | (Transaction.remaining_amount > 0)).order_by(Transaction.due_date).all()
+        if due_q:
+            due_rows = []
+            for t in due_q:
+                due_rows.append({'Tarih': t.due_date.strftime('%d.%m.%Y') if hasattr(t.due_date, 'strftime') else str(t.due_date), 'No': t.invoice_number or '', 'Taraf': t.party_name or '', 'Kalan': float(t.remaining_amount or 0), 'Durum': t.payment_status or ''})
+            df_due = pd.DataFrame(due_rows)
+            st.warning(f"{len(df_due)} adet vadesi yaklaşan/ödenmemiş işlem bulundu (son {days_ahead} gün).")
+            st.dataframe(df_due)
+            st.download_button('Vade Uyarıları CSV', data=df_due.to_csv(index=False).encode('utf-8'), file_name='due_alerts.csv')
+        else:
+            st.success('Belirtilen aralıkta vadesi yaklaşan veya ödenmemiş işlem yok.')
+        sess3.close()
+    except Exception as e:
+        st.error(f'Vade uyarıları alınırken hata: {e}')
     finally:
         s.close()
