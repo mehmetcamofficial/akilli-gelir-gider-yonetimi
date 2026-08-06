@@ -24,6 +24,7 @@ from views.control_center import render_control_center
 from views.settings import render_settings
 from views.drive_import import render_drive_import
 from views.document_reconciliation import render_document_reconciliation
+from views.management_analytics import render_management_analytics
 
 
 def main():
@@ -44,7 +45,7 @@ def main():
             ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri"]),
             ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
-            ("Analiz & Rapor", ["Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Belge Mutabakatı", "Kontrol Merkezi", "Ayarlar"]),
+            ("Rapor ve Analiz", ["Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Belge Mutabakatı", "Kontrol Merkezi", "Ayarlar"]),
         ]
     )
 
@@ -86,6 +87,8 @@ def main():
         render_tour_profitability()
     elif selected_page == "Raporlar":
         render_reports()
+    elif selected_page == "Yönetim Analitiği":
+        render_management_analytics()
     elif selected_page == "Excel Veri Aktarımı":
         render_drive_import()
     elif selected_page == "Belge Arşivi":

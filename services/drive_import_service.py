@@ -343,7 +343,10 @@ class ImportExecutionService:
                 if status == "Mükerrer" and not include_duplicates: result["duplicates"] += 1; result["skipped"] += 1; continue
                 cls._insert(session, batch.id, dataset_type, row, result); result["imported"] += 1
             batch.imported_rows=result["imported"]; batch.skipped_rows=result["skipped"]; batch.error_rows=result["errors"]; batch.duplicate_rows=result["duplicates"]; batch.result_json=json.dumps(result)
-            ImportAuditService.log(session, "import_completed", batch.id, result); session.commit(); return batch.id, result
+            ImportAuditService.log(session, "import_completed", batch.id, result); session.commit()
+            from services.analytics_service import clear_analytics_cache
+            clear_analytics_cache()
+            return batch.id, result
         except Exception:
             session.rollback(); raise
 

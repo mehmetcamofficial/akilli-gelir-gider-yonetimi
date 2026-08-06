@@ -250,6 +250,8 @@ def _persist(session, left_info, right_info, left, right, result, action, destin
         session.add(Transaction(transaction_type="expense", invoice_type="purchase", transaction_date=ValueNormalizationService.date(left.get("document_date")) or datetime.utcnow(), invoice_number=left.get("invoice_number"), party_name=left.get("supplier_name"), currency=left.get("currency") or "TRY", subtotal=left.get("subtotal") or 0, tax_total=left.get("tax_amount") or 0, grand_total=left.get("grand_total") or 0, paid_amount=left.get("paid_amount") or 0, remaining_amount=left.get("remaining_amount") or 0, payment_status="Ödendi" if not left.get("remaining_amount") else "Kısmen Ödendi"))
     session.add(AuditLog(event_type=f"reconciliation_{action}", entity_type="document_reconciliation", entity_id=reconciliation.id, details_json=json.dumps({"destination": destination}, ensure_ascii=False)))
     session.commit()
+    from services.analytics_service import clear_analytics_cache
+    clear_analytics_cache()
     return reconciliation.id
 
 
