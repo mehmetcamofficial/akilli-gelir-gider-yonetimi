@@ -295,15 +295,53 @@ def show():
             styled = df_due.style.applymap(color_kalan, subset=['Kalan']).applymap(color_durum, subset=['Durum'])
             st.dataframe(styled, height=300)
             st.download_button('Vade Uyarıları CSV', data=df_due.to_csv(index=False).encode('utf-8'), file_name='due_alerts.csv')
-            # reminders: TXT export and simulated send
-            reminder_text = "\n".join([f"Fatura: {r['No']} | {r['Taraf']} | Vade: {r['Tarih']} | Kalan: {r['Kalan']}" for r in due_rows])
-            ra, rb = st.columns([1,1])
-            with ra:
-                if st.button('Hatırlatma Gönder (Simülasyon)'):
-                    st.success(f"{len(df_due)} hatırlatma simülasyonu gönderildi.")
-                    st.code(reminder_text)
-            with rb:
-                st.download_button('Hatırlatma TXT İndir', data=reminder_text.encode('utf-8'), file_name='reminders.txt')
+            # bulk actions: select rows with checkboxes
+            st.markdown('**Toplu İşlemler**')
+            selected_ids = []
+            selected_rows = []
+            for idx, r in enumerate(due_rows):
+                cols_sel = st.columns([1,6])
+                with cols_sel[0]:
+                    sel = st.checkbox('', key=f'due_sel_{idx}')
+                with cols_sel[1]:
+                    st.write(f"{r['Tarih']} | {r['No']} | {r['Taraf']} | Kalan: {r['Kalan']}")
+                if sel:
+                    # find transaction id by invoice number and party from DB
+                    try:
+                        tx = sess3.query(Transaction).filter(Transaction.invoice_number == r['No']).filter(Transaction.party_name == r['Taraf']).first()
+                        if tx:
+                            selected_ids.append(tx.id)
+                            selected_rows.append({'id': tx.id, 'no': r['No'], 'taraf': r['Taraf'], 'tarih': r['Tarih'], 'kalan': r['Kalan']})
+                    except Exception:
+                        continue
+
+            if selected_ids:
+                ca, cb = st.columns(2)
+                with ca:
+                    if st.button('Toplu Ödemeyi İşaretle'):
+                        try:
+                            for tid in selected_ids:
+                                txm = sess3.query(Transaction).filter(Transaction.id == int(tid)).first()
+                                if txm and float(txm.remaining_amount or 0) > 0:
+                                    try:
+                                        paid = Decimal(str(txm.paid_amount or 0)) + Decimal(str(txm.remaining_amount or 0))
+                                    except Exception:
+                                        paid = Decimal(str(txm.remaining_amount or 0))
+                                    txm.paid_amount = paid
+                                    txm.remaining_amount = Decimal('0.00')
+                                    txm.payment_status = 'ödendi'
+                                    sess3.add(txm)
+                            sess3.commit()
+                            st.success(f"{len(selected_ids)} işlem için ödemeler işaretlendi.")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f'Toplu ödeme işaretleme hatası: {e}')
+                with cb:
+                    if st.button('Toplu Hatırlatma Gönder (Simülasyon)'):
+                        reminder_text_sel = "\n".join([f"Fatura: {r['no']} | {r['taraf']} | Vade: {r['tarih']} | Kalan: {r['kalan']}" for r in selected_rows])
+                        st.success(f"{len(selected_rows)} hatırlatma simülasyonu oluşturuldu.")
+                        st.code(reminder_text_sel)
+                        st.download_button('Seçili Hatırlatma TXT İndir', data=reminder_text_sel.encode('utf-8'), file_name='selected_reminders.txt')
         else:
             st.success('Belirtilen aralıkta vadesi yaklaşan veya ödenmemiş işlem yok.')
         sess3.close()
