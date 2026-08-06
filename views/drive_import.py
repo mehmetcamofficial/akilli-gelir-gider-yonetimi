@@ -1,5 +1,3 @@
-import json
-import os
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
@@ -9,14 +7,20 @@ import streamlit as st
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Transaction, Booking
-from services.google_drive_service import create_drive_service, list_drive_excel_files, download_drive_file
-from services.drive_import_service import normalize_dataframe, normalize_column_name, parse_decimal, parse_date
+from services.google_drive_config import (
+    download_drive_file,
+    get_drive_service,
+    has_valid_drive_config,
+    initialize_drive_state,
+    list_drive_files,
+)
+from services.drive_import_service import normalize_column_name, parse_decimal, parse_date
 from utils.ui import page_header, section_header, empty_state
 
-LOCAL_CONFIG_PATH = Path(".streamlit/drive_local_secrets.json")
 SUPPORTED_EXTENSIONS = [".xlsx", ".xls", ".csv"]
 FIELD_ORDER = [
     ("transaction_date", "Tarih"),
+    ("due_date", "Vade Tarihi"),
     ("transaction_type", "İşlem Türü"),
     ("description", "Açıklama"),
     ("party_name", "Müşteri / Tedarikçi"),
@@ -32,64 +36,81 @@ FIELD_ORDER = [
 ]
 
 
-def _extract_folder_id(value):
-    if not value:
-        return ""
-    if "folders/" in value:
-        value = value.split("folders/")[-1].split("?")[0].strip()
-    return value.strip()
+def _format_drive_file_type(mime_type):
+    if mime_type == "application/vnd.google-apps.spreadsheet":
+        return "Google Sheets"
+    if mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return "XLSX"
+    if mime_type == "application/vnd.ms-excel":
+        return "XLS"
+    if mime_type == "text/csv":
+        return "CSV"
+    return mime_type
 
 
-def _read_service_account_json(secret_value):
-    if not secret_value:
-        return None
-    if isinstance(secret_value, dict):
-        return secret_value
+def _human_readable_size(size):
+    if not size:
+        return "—"
     try:
-        return json.loads(secret_value)
+        size = int(size)
     except Exception:
-        return None
+        return str(size)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size} {unit}"
+        size //= 1024
+    return f"{size} TB"
 
 
-def _load_local_config():
-    if LOCAL_CONFIG_PATH.exists():
-        try:
-            return json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_local_config(config):
-    LOCAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOCAL_CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _find_drive_secret():
-    drive_block = {}
+def _save_import_rows(rows):
+    session = sessionmaker(bind=engine)()
     try:
-        drive_block = st.secrets.get("drive", {}) or {}
+        imported, skipped = 0, 0
+        for raw in rows:
+            existing = None
+            if raw.get("invoice_number"):
+                existing = session.query(Transaction).filter(
+                    Transaction.invoice_number == raw["invoice_number"],
+                    Transaction.party_name == raw.get("party_name"),
+                ).first()
+            if existing:
+                skipped += 1
+                continue
+            txn = Transaction(
+                transaction_type=raw.get("transaction_type", "income"),
+                transaction_date=raw.get("transaction_date") or datetime.utcnow(),
+                due_date=raw.get("due_date"),
+                invoice_number=raw.get("invoice_number") or None,
+                description=raw.get("description") or None,
+                party_name=raw.get("party_name") or None,
+                currency=raw.get("currency", "TRY"),
+                exchange_rate=1,
+                subtotal=raw.get("subtotal", parse_decimal(0)),
+                tax_total=raw.get("tax_total", parse_decimal(0)),
+                grand_total=raw.get("grand_total", parse_decimal(0)),
+                paid_amount=parse_decimal(0),
+                remaining_amount=raw.get("grand_total", parse_decimal(0)),
+                payment_status=raw.get("payment_status", "Ödenmedi"),
+                invoice_type="sale" if raw.get("transaction_type") == "income" else "purchase",
+            )
+            if raw.get("booking_number"):
+                booking = session.query(Booking).filter(
+                    Booking.booking_number == raw["booking_number"]
+                ).first()
+                if booking:
+                    txn.description = (
+                        f"{txn.description or ''} | Rezervasyon: {booking.booking_number}".strip(" | ")
+                    )
+            session.add(txn)
+            imported += 1
+        session.commit()
+        return imported, skipped
     except Exception:
-        drive_block = {}
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    local_config = _load_local_config()
-    service_json = (
-        st.secrets.get("gcp_service_account")
-        or st.secrets.get("drive_service_account_json")
-        or drive_block.get("drive_service_account_json")
-        or drive_block.get("service_account_json")
-        or local_config.get("service_account_json", "")
-    )
-    folder_id = (
-        st.secrets.get("drive_folder_id")
-        or drive_block.get("drive_folder_id", "")
-        or local_config.get("folder_id", "")
-    )
-
-    return {
-        "service_account_json": service_json,
-        "folder_id": folder_id,
-    }
 
 
 def _get_sheet_names(file_bytes, filename):
@@ -114,6 +135,18 @@ def _guess_column_mapping(columns):
     for field_key, _ in FIELD_ORDER:
         guess = "<Boş>"
         for col, norm in zip(columns, normalized):
+            if field_key == "transaction_date" and norm in ["tarih", "işlem tarihi", "belge tarihi"]:
+                guess = col
+                break
+            if field_key == "due_date" and norm in ["vade tarihi", "ödeme tarihi"]:
+                guess = col
+                break
+            if field_key == "description" and norm in ["açıklama", "not"]:
+                guess = col
+                break
+            if field_key == "currency" and norm in ["para birimi", "döviz", "currency"]:
+                guess = col
+                break
             if field_key == "income" and "gelir" in norm:
                 guess = col
                 break
@@ -252,6 +285,41 @@ def _load_local_preview(file_bytes, filename, sheet_name=None):
     return _load_dataframe(file_bytes, filename, sheet_name=sheet_name)
 
 
+def _render_import_workflow(file_bytes, filename, ui_prefix, save_label):
+    sheet_names = _get_sheet_names(file_bytes, filename)
+    selected_sheet = sheet_names[0]
+    if len(sheet_names) > 1:
+        selected_sheet = st.selectbox(
+            "Çalışma Sayfası Seç",
+            sheet_names,
+            key=f"{ui_prefix}_sheet_select",
+        )
+    df = _load_dataframe(file_bytes, filename, sheet_name=selected_sheet)
+    st.write(
+        f"**{filename}** — Toplam satır: {len(df)} | Toplam sütun: {len(df.columns)}"
+    )
+    st.dataframe(df.head(20))
+    if df.empty:
+        empty_state("Dosya boş", "Seçilen dosya veri içermiyor.")
+        return
+
+    mapping = _render_mapping_section(df, ui_prefix)
+    rows = _build_import_rows(df, mapping)
+    st.markdown("#### Veri Özeti")
+    _preview_rows(rows)
+    confirm = st.checkbox(
+        "Önizlemeyi kontrol ettim ve aktarımı onaylıyorum.",
+        key=f"{ui_prefix}_confirm",
+    )
+    if st.button(save_label, key=f"{ui_prefix}_save", disabled=not rows or not confirm):
+        imported, skipped = _save_import_rows(rows)
+        st.success(f"{imported} kayıt başarıyla aktarıldı.")
+        if skipped:
+            st.warning(
+                f"{skipped} kayıt, aynı fatura numarası ve müşteri bilgisi nedeniyle atlandı."
+            )
+
+
 def render_drive_import():
     page_header(
         "Excel Veri Aktarımı",
@@ -273,177 +341,97 @@ def render_drive_import():
 
     if uploaded_file is not None:
         filename = uploaded_file.name
-        ext = Path(filename).suffix.lower()
-        if ext not in SUPPORTED_EXTENSIONS:
+        if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
             st.error("Desteklenen formatlar: XLSX, XLS, CSV")
         else:
-            file_bytes = uploaded_file.getvalue()
             try:
-                sheet_names = _get_sheet_names(file_bytes, filename)
-                selected_sheet = sheet_names[0] if len(sheet_names) == 1 else st.selectbox("Çalışma Sayfası Seç", sheet_names, key="local_sheet_select")
-                df = _load_dataframe(file_bytes, filename, sheet_name=selected_sheet)
-                st.write(f"**{filename}** yüklendi. Toplam satır: {len(df)} | Toplam sütun: {len(df.columns)}")
-                st.dataframe(df.head(20))
-
-                if df.empty:
-                    empty_state("Dosya boş", "Seçilen dosya veri içermiyor.")
-                else:
-                    mapping = _render_mapping_section(df, "local")
-                    rows = _build_import_rows(df, mapping)
-                    st.markdown("#### Veri Özeti")
-                    _preview_rows(rows)
-                    if st.button("Verileri Kaydet", key="local_save_data"):
-                        if not rows:
-                            st.warning("Veritabanına aktarım için geçerli veri bulunamadı.")
-                        else:
-                            session = sessionmaker(bind=engine)()
-                            imported, skipped = 0, 0
-                            for raw in rows:
-                                existing = None
-                                if raw.get("invoice_number"):
-                                    existing = session.query(Transaction).filter(
-                                        Transaction.invoice_number == raw["invoice_number"],
-                                        Transaction.party_name == raw.get("party_name"),
-                                    ).first()
-                                if existing:
-                                    skipped += 1
-                                    continue
-                                txn = Transaction(
-                                    transaction_type=raw.get("transaction_type", "income"),
-                                    transaction_date=raw.get("transaction_date") or datetime.utcnow(),
-                                    due_date=raw.get("due_date"),
-                                    invoice_number=raw.get("invoice_number") or None,
-                                    description=raw.get("description") or None,
-                                    party_name=raw.get("party_name") or None,
-                                    currency=raw.get("currency", "TRY"),
-                                    exchange_rate=1,
-                                    subtotal=raw.get("subtotal", parse_decimal(0)),
-                                    tax_total=raw.get("tax_total", parse_decimal(0)),
-                                    grand_total=raw.get("grand_total", parse_decimal(0)),
-                                    paid_amount=parse_decimal(0),
-                                    remaining_amount=raw.get("grand_total", parse_decimal(0)),
-                                    payment_status=raw.get("payment_status", "Ödenmedi"),
-                                    invoice_type="sale" if raw.get("transaction_type") == "income" else "purchase",
-                                )
-                                if raw.get("booking_number"):
-                                    booking = session.query(Booking).filter(Booking.booking_number == raw["booking_number"]).first()
-                                    if booking:
-                                        txn.description = (
-                                            f"{txn.description or ''} | Rezervasyon: {booking.booking_number}".strip(' | ')
-                                        )
-                                session.add(txn)
-                                imported += 1
-                            session.commit()
-                            session.close()
-                            st.success(f"{imported} kayıt başarıyla aktarıldı.")
-                            if skipped:
-                                st.warning(f"{skipped} kayıt, aynı fatura numarası ve müşteri bilgisi nedeniyle atlandı.")
+                _render_import_workflow(
+                    uploaded_file.getvalue(),
+                    filename,
+                    "local",
+                    "Verileri Kaydet",
+                )
             except Exception as exc:
                 st.error(f"Dosya okunamadı veya işlenemedi: {exc}")
 
     st.markdown("---")
     section_header("Google Drive’dan Al", "Bağlı Google Drive klasöründeki Excel dosyalarını görüntüleyin ve içe aktarın.")
 
-    secrets = _find_drive_secret()
-    account_info = _read_service_account_json(secrets["service_account_json"])
-    folder_id = _extract_folder_id(secrets["folder_id"])
-    service = None
-    files = []
+    initialize_drive_state()
+    if not has_valid_drive_config():
+        st.warning("Google Drive bağlantısı kurulmamış.")
+        return
+    if not st.session_state.gdrive_connected:
+        st.info("Google Drive bilgileri hazır. Bağlantıyı Ayarlar sayfasından test edin.")
+        return
 
-    if account_info and folder_id:
+    refresh_col, status_col = st.columns([1, 3])
+    with refresh_col:
+        refresh = st.button("Drive Dosyalarını Yenile", key="drive_refresh_files")
+    if refresh:
         try:
-            service = create_drive_service(account_info)
+            list_drive_files()
+            st.success(f"{len(st.session_state.gdrive_files)} dosya bulundu.")
         except Exception as exc:
-            st.warning(f"Drive bağlantısı başlatılamadı: {exc}")
+            st.session_state.gdrive_connected = False
+            st.session_state.gdrive_connection_error = str(exc)
+            st.error(f"Drive dosyaları yenilenemedi: {exc}")
+            return
+    with status_col:
+        st.write(f"**{len(st.session_state.gdrive_files)} dosya hazır**")
 
-    if service is None:
-        st.warning(
-            "Drive dosyalarını kullanmak için Ayarlar sayfasında Google Drive servis hesabı JSON ve klasör ID girin."
-        )
-    else:
-        if st.button("Drive Dosyalarını Göster", key="drive_show_files"):
+    files = st.session_state.gdrive_files
+    if not files:
+        empty_state("Dosya bulunamadı", "Bağlı klasörde desteklenen Excel, CSV veya Google Sheets dosyası yok.")
+        return
+
+    search_term = st.text_input("Dosya ara", key="drive_file_search").strip().lower()
+    filtered = [item for item in files if search_term in item.get("name", "").lower()]
+    st.markdown("### Google Drive Dosyaları")
+    st.caption(f"{len(filtered)} dosya gösteriliyor.")
+
+    for item in filtered:
+        file_id = item["id"]
+        name = item.get("name", "Adsız dosya")
+        modified = item.get("modifiedTime", "—")
+        if modified != "—":
             try:
-                files = list_drive_excel_files(folder_id, service)
-                st.session_state.drive_files = files
-                st.success(f"{len(files)} dosya bulundu.")
-            except Exception as exc:
-                st.error(f"Drive dosyaları listelenemedi: {exc}")
-        files = st.session_state.get("drive_files", [])
-
-        if files:
-            search_term = st.text_input("Dosya ara", key="drive_file_search")
-            filtered = [f for f in files if search_term.lower() in f["name"].lower()] if search_term else files
-            st.write(f"{len(filtered)} dosya gösteriliyor.")
-            selected_file = st.selectbox(
-                "Aktarılacak dosyayı seçin",
-                filtered,
-                format_func=lambda f: f["name"],
-                key="drive_selected_file",
+                modified = datetime.fromisoformat(modified.replace("Z", "+00:00")).strftime("%d.%m.%Y %H:%M")
+            except ValueError:
+                pass
+        info_col, preview_col, import_col = st.columns([6, 1, 1])
+        with info_col:
+            st.markdown(f"**{name}**")
+            st.caption(
+                f"{_format_drive_file_type(item.get('mimeType'))} • {modified} • {_human_readable_size(item.get('size'))}"
             )
-        else:
-            selected_file = None
+        with preview_col:
+            if st.button("Önizle", key=f"drive_preview_{file_id}"):
+                st.session_state.gdrive_selected_file_id = file_id
+        with import_col:
+            if st.button("İçe Aktar", key=f"drive_import_{file_id}"):
+                st.session_state.gdrive_selected_file_id = file_id
 
-        if selected_file:
-            with st.expander(f"{selected_file['name']} önizlemesi", expanded=True):
-                try:
-                    buffer = download_drive_file(selected_file["id"], selected_file["mimeType"], service)
-                    bytes_data = buffer.getvalue()
-                    sheet_names = _get_sheet_names(bytes_data, selected_file["name"])
-                    selected_sheet = sheet_names[0] if len(sheet_names) == 1 else st.selectbox("Çalışma Sayfası Seç", sheet_names, key="drive_sheet_select")
-                    df = _load_dataframe(bytes_data, selected_file["name"], sheet_name=selected_sheet)
-                    st.dataframe(df.head(20))
-                    if df.empty:
-                        empty_state("Dosya boş", "Seçilen Drive dosyasında veri bulunamadı.")
-                    else:
-                        mapping = _render_mapping_section(df, "drive")
-                        rows = _build_import_rows(df, mapping)
-                        st.markdown("#### Veri Özeti")
-                        _preview_rows(rows)
-                        if st.button("Drive'dan Verileri Kaydet", key="drive_save_data"):
-                            if not rows:
-                                st.warning("Veritabanına aktarım için geçerli veri bulunamadı.")
-                            else:
-                                session = sessionmaker(bind=engine)()
-                                imported, skipped = 0, 0
-                                for raw in rows:
-                                    existing = None
-                                    if raw.get("invoice_number"):
-                                        existing = session.query(Transaction).filter(
-                                            Transaction.invoice_number == raw["invoice_number"],
-                                            Transaction.party_name == raw.get("party_name"),
-                                        ).first()
-                                    if existing:
-                                        skipped += 1
-                                        continue
-                                    txn = Transaction(
-                                        transaction_type=raw.get("transaction_type", "income"),
-                                        transaction_date=raw.get("transaction_date") or datetime.utcnow(),
-                                        due_date=raw.get("due_date"),
-                                        invoice_number=raw.get("invoice_number") or None,
-                                        description=raw.get("description") or None,
-                                        party_name=raw.get("party_name") or None,
-                                        currency=raw.get("currency", "TRY"),
-                                        exchange_rate=1,
-                                        subtotal=raw.get("subtotal", parse_decimal(0)),
-                                        tax_total=raw.get("tax_total", parse_decimal(0)),
-                                        grand_total=raw.get("grand_total", parse_decimal(0)),
-                                        paid_amount=parse_decimal(0),
-                                        remaining_amount=raw.get("grand_total", parse_decimal(0)),
-                                        payment_status=raw.get("payment_status", "Ödenmedi"),
-                                        invoice_type="sale" if raw.get("transaction_type") == "income" else "purchase",
-                                    )
-                                    if raw.get("booking_number"):
-                                        booking = session.query(Booking).filter(Booking.booking_number == raw["booking_number"]).first()
-                                        if booking:
-                                            txn.description = (
-                                                f"{txn.description or ''} | Rezervasyon: {booking.booking_number}".strip(' | ')
-                                            )
-                                    session.add(txn)
-                                    imported += 1
-                                session.commit()
-                                session.close()
-                                st.success(f"{imported} kayıt başarıyla aktarıldı.")
-                                if skipped:
-                                    st.warning(f"{skipped} kayıt, aynı fatura numarası ve müşteri bilgisi nedeniyle atlandı.")
-                except Exception as exc:
-                    st.error(f"Drive dosyası okunamadı veya işlenemedi: {exc}")
+    selected_id = st.session_state.get("gdrive_selected_file_id")
+    selected_file = next((item for item in files if item.get("id") == selected_id), None)
+    if not selected_file:
+        return
+
+    st.markdown("---")
+    st.subheader(f"{selected_file['name']} — Önizleme ve İçe Aktarma")
+    try:
+        service = get_drive_service()
+        buffer = download_drive_file(
+            selected_file["id"], selected_file["mimeType"], service=service
+        )
+        filename = selected_file["name"]
+        if selected_file["mimeType"] == "application/vnd.google-apps.spreadsheet":
+            filename = f"{Path(filename).stem}.xlsx"
+        _render_import_workflow(
+            buffer.getvalue(),
+            filename,
+            f"drive_{selected_file['id']}",
+            "Drive'dan Verileri Kaydet",
+        )
+    except Exception as exc:
+        st.error(f"Drive dosyası okunamadı veya işlenemedi: {exc}")

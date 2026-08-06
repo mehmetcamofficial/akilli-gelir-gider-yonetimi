@@ -3,10 +3,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
 from database.db import engine
 from database.models import Booking, SupplierPayment, Customer, Supplier
+from utils.ui import page_header, section_header, format_currency, empty_state
 
 
 def render_accounts():
-    st.header("Cari Hesaplar")
+    page_header(
+        "Cari Hesaplar",
+        "Müşteri ve tedarikçi cari hesap bakiyelerini ve kritik alacak/borç kalemlerini izleyin.",
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -29,7 +33,10 @@ def render_accounts():
     if customer_balances:
         st.table([{"Müşteri": f"{c.first_name} {c.last_name}", "Bakiye": f"{c.balance:,.2f} ₺"} for c in customer_balances])
     else:
-        st.info("Henüz alacak kaydı yok.")
+        empty_state(
+            "Cari alacak kaydı bulunamadı",
+            "Cari hesap hareketi olmayınca alacak özetlerini görüntüleyemezsiniz.",
+        )
 
     st.subheader("En Büyük 5 Tedarikçi Borcu")
     supplier_balances = session.query(
@@ -40,6 +47,9 @@ def render_accounts():
     if supplier_balances:
         st.table([{"Tedarikçi": s.name, "Bakiye": f"{s.balance:,.2f} ₺"} for s in supplier_balances])
     else:
-        st.info("Henüz tedarikçi borç kaydı yok.")
+        empty_state(
+            "Tedarikçi borç kaydı bulunamadı",
+            "Tedarikçi borç kayıtları eklenince borç özetleri burada gösterilecektir.",
+        )
 
     session.close()

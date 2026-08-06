@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Supplier
+from utils.ui import empty_state
 
 
 def render_suppliers():
@@ -55,6 +56,9 @@ def render_suppliers():
         for s in suppliers:
             st.write(f"{s.id} - {s.name} | {s.supplier_type or '-'} | {s.contact_person or '-'} | {s.phone or '-'}")
     else:
-        st.info("Henüz tedarikçi kaydı yok.")
+        empty_state(
+            "Tedarikçi kaydı yok",
+            "Tedarikçi ekleyerek borç ve ödeme süreçlerinizi düzenleyin.",
+        )
 
     session.close()

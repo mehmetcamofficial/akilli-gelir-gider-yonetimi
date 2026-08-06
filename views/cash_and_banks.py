@@ -3,10 +3,14 @@ from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import CashAccount, BankAccount
+from utils.ui import page_header, section_header, format_currency, empty_state
 
 
 def render_cash_and_banks():
-    st.header("Kasa ve Bankalar")
+    page_header(
+        "Kasa ve Bankalar",
+        "Nakit ve banka hesaplarınızı tek ekrandan takip edin.",
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -50,7 +54,10 @@ def render_cash_and_banks():
         for acc in cash_accounts:
             st.write(f"{acc.name} | Bakiye: {acc.balance:,.2f} {acc.currency}")
     else:
-        st.info("Henüz kasa hesabı yok.")
+        empty_state(
+            "Kasa hesabı yok",
+            "Kasa bakiyeleri ekleyerek nakit akışınızı güvenli şekilde takip edin.",
+        )
 
     st.subheader("Banka Hesapları")
     bank_accounts = session.query(BankAccount).order_by(BankAccount.bank_name).all()
@@ -58,6 +65,9 @@ def render_cash_and_banks():
         for acc in bank_accounts:
             st.write(f"{acc.bank_name} - {acc.account_number or '-'} | Bakiye: {acc.balance:,.2f} {acc.currency}")
     else:
-        st.info("Henüz banka hesabı yok.")
+        empty_state(
+            "Banka hesabı yok",
+            "Banka hesaplarınızı ekleyerek finansal görünürlüğü artırın.",
+        )
 
     session.close()

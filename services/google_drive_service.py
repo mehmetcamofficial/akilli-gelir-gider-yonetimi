@@ -3,10 +3,15 @@ from io import BytesIO
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+ALLOWED_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/csv",
+    "application/vnd.google-apps.spreadsheet",
+}
 
 
 def create_drive_service(service_account_info):
@@ -22,9 +27,11 @@ def create_drive_service(service_account_info):
 
 def list_drive_excel_files(folder_id, service):
     query = (
-        f"'{folder_id}' in parents and (mimeType = 'application/vnd.google-apps.spreadsheet'"
-        " or mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
-        " or mimeType = 'application/vnd.ms-excel')"
+        f"'{folder_id}' in parents and trashed = false and ("
+        "mimeType = 'application/vnd.google-apps.spreadsheet' or "
+        "mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or "
+        "mimeType = 'application/vnd.ms-excel' or "
+        "mimeType = 'text/csv')"
     )
     results = []
     page_token = None
@@ -33,7 +40,7 @@ def list_drive_excel_files(folder_id, service):
         response = service.files().list(
             q=query,
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, modifiedTime, size)",
+            fields="nextPageToken, files(id, name, mimeType, modifiedTime, size, webViewLink)",
             pageToken=page_token,
             pageSize=200,
         ).execute()

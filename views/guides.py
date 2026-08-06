@@ -2,6 +2,7 @@ import streamlit as st
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Guide
+from utils.ui import empty_state
 
 
 def render_guides():
@@ -55,6 +56,9 @@ def render_guides():
         for g in guides:
             st.write(f"{g.id} - {g.first_name} {g.last_name} | {g.languages or '-'} | {g.phone or '-'} | Ücret: {g.daily_fee:,.2f} {g.currency}")
     else:
-        st.info("Henüz rehber kaydı yok.")
+        empty_state(
+            "Rehber kaydı yok",
+            "Yeni rehber ekleyerek tur operasyonlarınıza maliyet ve görev kontrolü ekleyin.",
+        )
 
     session.close()
