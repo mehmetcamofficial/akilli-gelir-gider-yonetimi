@@ -80,6 +80,56 @@ class DocumentReconciliation(Base):
     reviewed_at = Column(DateTime, nullable=True)
 
 
+class ReconciliationDocument(Base):
+    __tablename__ = "reconciliation_documents"
+    id = Column(Integer, primary_key=True)
+    reconciliation_id = Column(Integer, ForeignKey("document_reconciliations.id"), nullable=False, index=True)
+    side = Column(String(20), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    source_type = Column(String(100), nullable=False)
+    source_entity_type = Column(String(100), nullable=True)
+    source_entity_id = Column(Integer, nullable=True)
+    filename = Column(String(512), nullable=True)
+    file_hash = Column(String(128), nullable=True, index=True)
+    content_base64 = Column(Text, nullable=True)
+    extracted_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReconciliationField(Base):
+    __tablename__ = "reconciliation_fields"
+    id = Column(Integer, primary_key=True)
+    reconciliation_id = Column(Integer, ForeignKey("document_reconciliations.id"), nullable=False, index=True)
+    field_name = Column(String(100), nullable=False)
+    incoming_value = Column(Text, nullable=True)
+    agency_value = Column(Text, nullable=True)
+    status = Column(String(100), nullable=False)
+    explanation = Column(Text, nullable=True)
+
+
+class ReconciliationDifference(Base):
+    __tablename__ = "reconciliation_differences"
+    id = Column(Integer, primary_key=True)
+    reconciliation_id = Column(Integer, ForeignKey("document_reconciliations.id"), nullable=False, index=True)
+    field_name = Column(String(100), nullable=False)
+    incoming_value = Column(Text, nullable=True)
+    agency_value = Column(Text, nullable=True)
+    difference_value = Column(Text, nullable=True)
+    severity = Column(String(50), nullable=False)
+    explanation = Column(Text, nullable=True)
+
+
+class ReconciliationApproval(Base):
+    __tablename__ = "reconciliation_approvals"
+    id = Column(Integer, primary_key=True)
+    reconciliation_id = Column(Integer, ForeignKey("document_reconciliations.id"), nullable=False, index=True)
+    action = Column(String(100), nullable=False)
+    destination = Column(String(100), nullable=True)
+    approved_by = Column(String(255), nullable=True)
+    note = Column(Text, nullable=True)
+    approved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True)
@@ -88,6 +138,34 @@ class AuditLog(Base):
     entity_id = Column(Integer, nullable=True)
     details_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ImportBatch(Base):
+    __tablename__ = "import_batches"
+    id = Column(Integer, primary_key=True)
+    filename = Column(String(512), nullable=False)
+    file_hash = Column(String(128), nullable=False, index=True)
+    dataset_type = Column(String(100), nullable=False)
+    total_rows = Column(Integer, default=0)
+    imported_rows = Column(Integer, default=0)
+    skipped_rows = Column(Integer, default=0)
+    error_rows = Column(Integer, default=0)
+    duplicate_rows = Column(Integer, default=0)
+    result_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BankTransaction(Base):
+    __tablename__ = "bank_transactions"
+    id = Column(Integer, primary_key=True)
+    transaction_date = Column(DateTime, nullable=True)
+    description = Column(Text, nullable=True)
+    reference_number = Column(String(255), nullable=True)
+    amount = Column(Numeric(18, 2), default=Decimal("0.00"))
+    currency = Column(String(10), default="TRY")
+    transaction_type = Column(String(20), nullable=True)
+    import_batch_id = Column(Integer, ForeignKey("import_batches.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class InvoiceItem(Base):
