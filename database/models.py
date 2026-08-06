@@ -38,6 +38,7 @@ class Transaction(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False)
     documents = relationship("Document", back_populates="transaction")
+    items = relationship("InvoiceItem", back_populates="invoice")
 
 
 class Document(Base):
@@ -52,3 +53,22 @@ class Document(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
     transaction = relationship("Transaction", back_populates="documents")
+
+
+class InvoiceItem(Base):
+    __tablename__ = "invoice_items"
+    id = Column(Integer, primary_key=True)
+    invoice_id = Column(Integer, ForeignKey("transactions.id"), nullable=False)
+    product_id = Column(Integer, nullable=True)
+    description = Column(String(500), nullable=True)
+    quantity = Column(Numeric(18,4), default=Decimal('1.0'))
+    unit = Column(String(50), nullable=True)
+    unit_price = Column(Numeric(18,4), default=Decimal('0.00'))
+    discount_rate = Column(Numeric(5,2), default=Decimal('0.00'))
+    discount_amount = Column(Numeric(18,2), default=Decimal('0.00'))
+    tax_rate = Column(Numeric(5,2), default=Decimal('0.00'))
+    tax_amount = Column(Numeric(18,2), default=Decimal('0.00'))
+    line_total = Column(Numeric(18,2), default=Decimal('0.00'))
+    additional_cost = Column(Numeric(18,2), default=Decimal('0.00'))
+    net_cost = Column(Numeric(18,2), default=Decimal('0.00'))
+    invoice = relationship("Transaction", back_populates="items")
