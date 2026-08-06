@@ -43,7 +43,7 @@ def main():
             ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri"]),
             ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
-            ("Analiz & Rapor", ["Raporlar", "Drive Excel Aktarımı", "Belge Arşivi", "Kontrol Merkezi", "Ayarlar"]),
+            ("Analiz & Rapor", ["Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Kontrol Merkezi", "Ayarlar"]),
         ]
     )
 
@@ -85,7 +85,7 @@ def main():
         render_tour_profitability()
     elif selected_page == "Raporlar":
         render_reports()
-    elif selected_page == "Drive Excel Aktarımı":
+    elif selected_page == "Excel Veri Aktarımı":
         render_drive_import()
     elif selected_page == "Belge Arşivi":
         render_documents()

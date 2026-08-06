@@ -12,5 +12,8 @@ database/app.db
 uploads/
 exports/
 
+# Streamlit local config
+.streamlit/
+
 # Env
 .env
