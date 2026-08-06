@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 import base64
+=======
+>>>>>>> origin/main
 import json
 import re
 import urllib.error
@@ -17,8 +20,15 @@ from database.models import (
 EXTRACTION_FIELDS = [
     "document_type", "supplier_name", "invoice_number", "document_date",
     "voucher_number", "booking_number", "tour_name", "service_date",
+<<<<<<< HEAD
     "passenger_count", "adult_count", "child_count", "currency", "unit_price",
     "subtotal", "tax_amount", "grand_total", "paid_amount", "remaining_amount",
+=======
+    "passenger_count", "adult_count", "child_count", "guide_count", "driver_count",
+    "free_person_count", "currency", "unit_price",
+    "subtotal", "tax_amount", "grand_total", "paid_amount", "remaining_amount",
+    "payment_method", "notes", "additional_charges", "discounts", "tax_rate",
+>>>>>>> origin/main
     "confidence", "unreadable_fields",
 ]
 DOCUMENT_TYPES = [
@@ -66,6 +76,7 @@ class OpenRouterDocumentExtractor:
     def schema():
         string_fields = {
             key: {"type": ["string", "null"]}
+<<<<<<< HEAD
             for key in EXTRACTION_FIELDS[:12]
             if key not in {"passenger_count", "adult_count", "child_count"}
         }
@@ -73,6 +84,18 @@ class OpenRouterDocumentExtractor:
         for key in ("passenger_count", "adult_count", "child_count"):
             properties[key] = {"type": ["integer", "null"]}
         for key in ("unit_price", "subtotal", "tax_amount", "grand_total", "paid_amount", "remaining_amount"):
+=======
+            for key in (
+                "document_type", "supplier_name", "invoice_number", "document_date",
+                "voucher_number", "booking_number", "tour_name", "service_date",
+                "currency", "payment_method", "notes",
+            )
+        }
+        properties = dict(string_fields)
+        for key in ("passenger_count", "adult_count", "child_count", "guide_count", "driver_count", "free_person_count"):
+            properties[key] = {"type": ["integer", "null"]}
+        for key in ("unit_price", "subtotal", "tax_amount", "grand_total", "paid_amount", "remaining_amount", "additional_charges", "discounts", "tax_rate"):
+>>>>>>> origin/main
             properties[key] = {"type": ["number", "null"]}
         properties["confidence"] = {"type": "number", "minimum": 0, "maximum": 1}
         properties["unreadable_fields"] = {"type": "array", "items": {"type": "string"}}
@@ -80,7 +103,10 @@ class OpenRouterDocumentExtractor:
         return {"type": "object", "properties": properties, "required": EXTRACTION_FIELDS, "additionalProperties": False}
 
     def extract(self, file_bytes, filename, mime_type, context=None):
+<<<<<<< HEAD
         encoded = base64.b64encode(file_bytes).decode("ascii")
+=======
+>>>>>>> origin/main
         prompt = (
             "Bu turizm muhasebe belgesini yalnızca sınıflandır ve görünen alanları çıkar. "
             "Tahmin etme; okunamayan alanları unreadable_fields listesine ekle. "
@@ -88,9 +114,23 @@ class OpenRouterDocumentExtractor:
             + json.dumps(SensitiveDataMaskingService.minimal_context(context), ensure_ascii=False)
         )
         if mime_type == "application/pdf":
+<<<<<<< HEAD
             media = {"type": "file", "file": {"filename": SensitiveDataMaskingService.mask_text(filename), "file_data": f"data:application/pdf;base64,{encoded}"}}
         else:
             media = {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}}
+=======
+            try:
+                import fitz
+                pdf = fitz.open(stream=file_bytes, filetype="pdf")
+                local_text = "\n".join(page.get_text("text") for page in pdf)
+            except Exception as exc:
+                raise AIExtractionError("PDF metni güvenli biçimde yerel olarak okunamadı. Manuel giriş kullanabilirsiniz.") from exc
+            if not local_text.strip():
+                raise AIExtractionError("Taranmış PDF kişisel veriler maskelenmeden AI'ya gönderilmedi. Manuel giriş kullanabilirsiniz.")
+            media = {"type": "text", "text": "Maskelenmiş belge metni:\n" + SensitiveDataMaskingService.mask_text(local_text)[:50000]}
+        else:
+            raise AIExtractionError("Görsel belge kişisel veriler yerel olarak maskelenemediği için AI'ya gönderilmedi. Manuel giriş kullanabilirsiniz.")
+>>>>>>> origin/main
         payload = {
             "model": self.MODEL,
             "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, media]}],
@@ -181,6 +221,12 @@ class DocumentMatchingService:
             "passenger_count": getattr(booking, "passenger_count", None),
             "adult_count": getattr(booking, "adult_count", None),
             "child_count": getattr(booking, "child_count", None),
+<<<<<<< HEAD
+=======
+            "guide_count": 0,
+            "driver_count": 0,
+            "free_person_count": 0,
+>>>>>>> origin/main
             "currency": getattr(booking, "currency", None) or getattr(payment, "currency", None) or getattr(invoice, "currency", None),
             "unit_price": getattr(booking, "unit_price", None),
             "subtotal": getattr(invoice, "subtotal", None) or getattr(booking, "total_price", None),
@@ -188,6 +234,11 @@ class DocumentMatchingService:
             "grand_total": getattr(invoice, "grand_total", None) or getattr(payment, "total_debt", None) or getattr(booking, "grand_total", None),
             "paid_amount": getattr(invoice, "paid_amount", None) or getattr(payment, "paid_amount", None) or getattr(booking, "collected_total", None),
             "remaining_amount": getattr(invoice, "remaining_amount", None) or getattr(payment, "remaining_amount", None) or getattr(booking, "remaining_amount", None),
+<<<<<<< HEAD
+=======
+            "payment_method": getattr(payment, "payment_method", None) or getattr(booking, "payment_method", None),
+            "notes": getattr(payment, "notes", None) or getattr(booking, "notes", None),
+>>>>>>> origin/main
             "booking_status": getattr(booking, "booking_status", None),
         }
 
@@ -230,13 +281,37 @@ class ReconciliationEngine:
         doc_date, agency_date = self._date(document.get("service_date")), self._date(agency.get("service_date"))
         if doc_date and agency_date and abs((doc_date - agency_date).days) > self.date_tolerance:
             differences.append({"field": "service_date", "label": "Hizmet tarihi", "document": str(doc_date), "agency": str(agency_date), "severity": "orta"})
+<<<<<<< HEAD
         for field, label in (("passenger_count", "Yolcu"), ("adult_count", "Yetişkin"), ("child_count", "Çocuk")):
+=======
+        for field, label in (("passenger_count", "Yolcu"), ("adult_count", "Yetişkin"), ("child_count", "Çocuk"), ("guide_count", "Rehber"), ("driver_count", "Şoför"), ("free_person_count", "Ücretsiz kişi")):
+>>>>>>> origin/main
             if document.get(field) is not None and agency.get(field) is not None and abs(int(document[field]) - int(agency[field])) > self.passenger_tolerance:
                 differences.append({"field": field, "label": label, "document": document[field], "agency": agency[field], "severity": "yüksek"})
         for field, label in (("unit_price", "Birim fiyat"), ("subtotal", "Ara toplam"), ("tax_amount", "Vergi"), ("grand_total", "Toplam"), ("paid_amount", "Önceki ödeme"), ("remaining_amount", "Kalan bakiye")):
             left, right = self._decimal(document.get(field)), self._decimal(agency.get(field))
             if left is not None and right is not None and abs(left - right) > self.amount_tolerance:
                 differences.append({"field": field, "label": label, "document": float(left), "agency": float(right), "severity": "yüksek" if field in {"grand_total", "currency"} else "orta"})
+<<<<<<< HEAD
+=======
+        paying_count = (document.get("passenger_count") or 0) - (document.get("free_person_count") or 0)
+        unit_price = self._decimal(agency.get("unit_price") or document.get("unit_price"))
+        additions = self._decimal(document.get("additional_charges")) or Decimal(0)
+        discounts = self._decimal(document.get("discounts")) or Decimal(0)
+        calculated_subtotal = Decimal(paying_count) * unit_price + additions - discounts if unit_price is not None else None
+        document_subtotal = self._decimal(document.get("subtotal"))
+        if calculated_subtotal is not None and document_subtotal is not None and abs(calculated_subtotal - document_subtotal) > self.amount_tolerance:
+            differences.append({"field": "subtotal_calculation", "label": "Ara toplam hesabı", "document": float(document_subtotal), "agency": float(calculated_subtotal), "severity": "yüksek"})
+        document_tax = self._decimal(document.get("tax_amount"))
+        tax_rate = self._decimal(document.get("tax_rate"))
+        if document_subtotal is not None and document_tax is not None and tax_rate is not None:
+            calculated_tax = document_subtotal * tax_rate / Decimal(100)
+            if abs(calculated_tax - document_tax) > self.amount_tolerance:
+                differences.append({"field": "tax_calculation", "label": "KDV hesabı", "document": float(document_tax), "agency": float(calculated_tax), "severity": "yüksek"})
+        document_total = self._decimal(document.get("grand_total"))
+        if document_subtotal is not None and document_tax is not None and document_total is not None and abs(document_subtotal + document_tax - document_total) > self.amount_tolerance:
+            differences.append({"field": "total_calculation", "label": "Genel toplam hesabı", "document": float(document_total), "agency": float(document_subtotal + document_tax), "severity": "yüksek"})
+>>>>>>> origin/main
         if duplicate_document:
             differences.append({"field": "document_hash", "label": "Mükerrer belge", "document": "Aynı dosya mevcut", "agency": "Tekil olmalı", "severity": "kritik"})
         if duplicate_invoice:

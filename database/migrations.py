@@ -359,7 +359,7 @@ def init_and_seed():
 
 
 def migrate_schema():
-    """Additive SQLite migration for fields introduced after the first release."""
+    """Additive legacy migration used by local SQLite fallback databases."""
     from .db import engine
 
     additions = {
@@ -432,17 +432,12 @@ def mark_legacy_demo_data():
 
 
 def migrate_add_invoice_type():
-    # Add invoice_type column to transactions if missing (SQLite)
+    """Portable additive migration retained for old local installations."""
     from .db import engine
-    conn = engine.connect()
-    res = conn.exec_driver_sql("PRAGMA table_info(transactions);")
-    cols = [r[1] for r in res.fetchall()]
-    if 'invoice_type' not in cols:
-        try:
-            conn.exec_driver_sql("ALTER TABLE transactions ADD COLUMN invoice_type VARCHAR(20);")
-        except Exception:
-            pass
-    conn.close()
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("transactions")}
+        if "invoice_type" not in columns:
+            connection.exec_driver_sql("ALTER TABLE transactions ADD COLUMN invoice_type VARCHAR(20)")
 
 
 if __name__ == "__main__":

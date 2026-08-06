@@ -147,10 +147,14 @@ def render_dashboard():
     )
 
     section_header("Finansal Trendler")
-    sales_q = session.query(func.strftime('%Y-%m', Booking.booking_date).label('month'), func.coalesce(func.sum(Booking.grand_total), 0).label('revenue')).group_by('month').order_by('month').all()
-    pay_q = session.query(func.strftime('%Y-%m', Collection.collection_date).label('month'), func.coalesce(func.sum(Collection.amount_in_tl), 0).label('collected')).group_by('month').order_by('month').all()
-    df_sales = pd.DataFrame(sales_q, columns=['month', 'revenue'])
-    df_pay = pd.DataFrame(pay_q, columns=['month', 'collected'])
+    sales_rows = session.query(Booking.booking_date, Booking.grand_total).filter(Booking.booking_date.isnot(None)).all()
+    collection_rows = session.query(Collection.collection_date, Collection.amount_in_tl).filter(Collection.collection_date.isnot(None)).all()
+    df_sales = pd.DataFrame([{"month": row.booking_date.strftime("%Y-%m"), "revenue": float(row.grand_total or 0)} for row in sales_rows])
+    df_pay = pd.DataFrame([{"month": row.collection_date.strftime("%Y-%m"), "collected": float(row.amount_in_tl or 0)} for row in collection_rows])
+    if not df_sales.empty: df_sales = df_sales.groupby("month", as_index=False)["revenue"].sum()
+    else: df_sales = pd.DataFrame(columns=["month", "revenue"])
+    if not df_pay.empty: df_pay = df_pay.groupby("month", as_index=False)["collected"].sum()
+    else: df_pay = pd.DataFrame(columns=["month", "collected"])
     if not df_sales.empty or not df_pay.empty:
         df_merge = pd.merge(df_sales, df_pay, on='month', how='outer').fillna(0)
         df_merge = df_merge.sort_values('month')

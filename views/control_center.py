@@ -1,5 +1,3 @@
-import os
-import platform
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -7,7 +5,7 @@ import streamlit as st
 from sqlalchemy import func, or_
 from sqlalchemy.orm import sessionmaker
 
-from database.db import DB_PATH, engine
+from database.db import database_health, engine
 from database.models import (
     Booking, Collection, Customer, Document, GuideAssignment, HotelBooking,
     Passenger, Supplier, SupplierPayment, Tour, TourCostItem, Transaction,
@@ -196,14 +194,17 @@ def render_control_center():
         render_metric_cards([{"title": label, "value": count, "note": "Toplam kayıt"} for label, count in counts], columns=4)
 
         with st.expander("Teknik Sistem Bilgileri", expanded=False):
-            exists = os.path.exists(DB_PATH)
+            health = database_health()
+            if health["ok"]:
+                st.success(health["message"])
+            else:
+                st.error(health["message"])
             info = {
-                "Database status": "Çalışıyor" if exists else "Bulunamadı",
-                "Database size": f"{os.path.getsize(DB_PATH) / 1024 / 1024:.2f} MB" if exists else "—",
-                "Last backup time": "Kayıt yok",
+                "Database provider": health["provider"],
+                "Table count": health["table_count"] if health["table_count"] is not None else "—",
+                "Last successful query": health["last_successful_query"].strftime("%d.%m.%Y %H:%M:%S UTC") if health["last_successful_query"] else "Henüz yok",
                 "Application version": "1.0.0",
                 "Last health check": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
-                "Environment": platform.system(),
             }
             st.table(pd.DataFrame(info.items(), columns=["Bilgi", "Değer"]))
     finally:
