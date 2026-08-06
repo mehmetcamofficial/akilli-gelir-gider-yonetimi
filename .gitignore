@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+
+# DB and uploads
+database/app.db
+uploads/
+exports/
+
+# Env
+.env
