@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import InvoiceItem, Product, Transaction, Category
 import plotly.express as px
+import services.reporting_service as reporting_service
 
 
 def _load_transactions():
@@ -63,6 +64,18 @@ def show():
         df.to_excel(towrite, index=False, engine='openpyxl')
         towrite.seek(0)
         st.download_button("Excel İndir", data=towrite, file_name="transactions.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # PDF export for full transaction list using reporting service
+        try:
+            SessionLocal = sessionmaker(bind=engine)
+            sess_pdf = SessionLocal()
+            if not df.empty:
+                smin = df.transaction_date.min().date()
+                smax = df.transaction_date.max().date()
+                pdf_bytes = reporting_service.generate_invoice_list_pdf(sess_pdf, smin, smax)
+                st.download_button("Fatura Listesi PDF İndir", data=pdf_bytes, file_name="transactions.pdf", mime="application/pdf")
+            sess_pdf.close()
+        except Exception as e:
+            st.error(f"PDF oluşturulamadı: {e}")
     except Exception:
         st.error("Excel oluşturulamadı; openpyxl yüklü olduğundan emin olun.")
 
@@ -113,6 +126,15 @@ def show():
             pdf.to_excel(towrite2, index=False, engine='openpyxl')
             towrite2.seek(0)
             st.download_button("Ürün Kârlılık Excel İndir", data=towrite2, file_name="product_profitability.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            # Product profitability PDF
+            try:
+                SessionPdf = sessionmaker(bind=engine)
+                sesspdf = SessionPdf()
+                pdf_bytes = reporting_service.generate_product_profitability_pdf(sesspdf, start_date, end_date)
+                st.download_button("Ürün Kârlılık PDF İndir", data=pdf_bytes, file_name="product_profitability.pdf", mime="application/pdf")
+                sesspdf.close()
+            except Exception as e:
+                st.error(f"Ürün kârlılık PDF oluşturulamadı: {e}")
         except Exception:
             st.error("Excel oluşturulamadı; openpyxl yüklü olduğundan emin olun.")
     else:
