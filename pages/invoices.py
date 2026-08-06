@@ -6,6 +6,9 @@ from services.storage_service import save_uploaded_file
 from services.validation_service import is_duplicate_invoice, validate_line_totals
 from decimal import Decimal
 import os
+from database.models import InvoiceItem, Product
+from sqlalchemy import select
+from datetime import date
 
 
 def _init_rows():
@@ -35,15 +38,42 @@ def show():
     session = Session()
 
     # prepare product list
-    products = session.query(__import__('database').models.Product).order_by(__import__('database').models.Product.name).all()
+    products = session.query(Product).order_by(Product.name).all()
     product_options = {str(p.id): f"{p.name} (Stok: {p.stock})" for p in products}
 
+    # support editing: prefill from session_state if editing_invoice_id set
+    editing_id = st.session_state.get('editing_invoice_id')
+    if editing_id:
+        inv_obj = session.query(Transaction).filter(Transaction.id == int(editing_id)).first()
+        if inv_obj:
+            st.session_state['inv_date'] = inv_obj.transaction_date.date() if hasattr(inv_obj.transaction_date, 'date') else inv_obj.transaction_date
+            st.session_state['due_date'] = inv_obj.due_date.date() if inv_obj.due_date and hasattr(inv_obj.due_date, 'date') else (inv_obj.due_date or date.today())
+            st.session_state['invoice_number'] = inv_obj.invoice_number
+            st.session_state['party'] = inv_obj.party_name
+            st.session_state['invoice_type'] = inv_obj.invoice_type or 'sale'
+            st.session_state['currency'] = inv_obj.currency or 'TRY'
+            # load items
+            items = session.query(InvoiceItem).filter(InvoiceItem.invoice_id == inv_obj.id).all()
+            st.session_state['invoice_rows'] = []
+            for it in items:
+                st.session_state['invoice_rows'].append({
+                    'description': it.description or '',
+                    'quantity': float(it.quantity or 0),
+                    'unit': it.unit or 'ad',
+                    'unit_price': float(it.unit_price or 0),
+                    'discount_amount': float(it.discount_amount or 0),
+                    'additional_cost': float(it.additional_cost or 0),
+                    'tax_amount': float(it.tax_amount or 0),
+                    'tax_rate': float(it.tax_amount) and 0.0,
+                    'product_id': int(it.product_id) if it.product_id else None
+                })
+
     with st.form("invoice_form"):
-        inv_date = st.date_input("Fatura Tarihi")
-        due_date = st.date_input("Vade Tarihi")
-        invoice_number = st.text_input("Fatura Numarası")
-        party = st.text_input("Firma / Müşteri / Tedarikçi")
-        invoice_type = st.selectbox("Fatura Türü", ["sale", "purchase"], format_func=lambda x: "Satış" if x=="sale" else "Alış")
+        inv_date = st.date_input("Fatura Tarihi", value=st.session_state.get('inv_date', date.today()))
+        due_date = st.date_input("Vade Tarihi", value=st.session_state.get('due_date', date.today()))
+        invoice_number = st.text_input("Fatura Numarası", value=st.session_state.get('invoice_number',''))
+        party = st.text_input("Firma / Müşteri / Tedarikçi", value=st.session_state.get('party',''))
+        invoice_type = st.selectbox("Fatura Türü", ["sale", "purchase"], index=0, format_func=lambda x: "Satış" if x=="sale" else "Alış")
         currency = st.selectbox("Para Birimi", ["TRY", "EUR", "USD"], index=0)
 
         st.markdown("**Kalemler**")
@@ -61,7 +91,12 @@ def show():
                         if label == prod_choice:
                             selected_pid = int(pid)
                             break
+                # if product selected and no tax_rate set, use product default
                 row['product_id'] = selected_pid
+                if selected_pid and not row.get('tax_rate'):
+                    prod = session.query(Product).filter(Product.id == int(selected_pid)).first()
+                    if prod and prod.default_tax_rate is not None:
+                        row['tax_rate'] = float(prod.default_tax_rate)
             with cols[1]:
                 row["quantity"] = st.number_input(f"Adet {i+1}", min_value=0.0, value=float(row.get("quantity",1)), step=1.0, key=f"qty_{i}")
             with cols[2]:
@@ -193,3 +228,47 @@ def show():
             st.download_button("İndir", data=open(d.file_path, 'rb').read(), file_name=d.original_filename)
 
     session.close()
+
+    # Invoice listing with filters and export
+    Session2 = sessionmaker(bind=engine)
+    s2 = Session2()
+    st.markdown("---")
+    st.subheader("Fatura Listesi")
+    parties = [r[0] for r in s2.query(Transaction.party_name).distinct().all() if r[0]]
+    flt_party = st.selectbox("Firma filtrele", options=["Hepsi"] + parties)
+    d1, d2 = st.columns(2)
+    with d1:
+        from_date = st.date_input("Başlangıç", value=date.today().replace(day=1))
+    with d2:
+        to_date = st.date_input("Bitiş", value=date.today())
+
+    q = s2.query(Transaction).filter(Transaction.is_deleted==False)
+    if flt_party and flt_party != "Hepsi":
+        q = q.filter(Transaction.party_name == flt_party)
+    q = q.filter(Transaction.transaction_date >= from_date)
+    q = q.filter(Transaction.transaction_date <= to_date)
+    rows = q.order_by(Transaction.transaction_date.desc()).limit(500).all()
+    import pandas as pd
+    data = []
+    for r in rows:
+        data.append({
+            'id': r.id,
+            'date': r.transaction_date,
+            'party': r.party_name,
+            'invoice': r.invoice_number,
+            'total': float(r.grand_total or 0),
+            'type': r.invoice_type or r.transaction_type
+        })
+    df = pd.DataFrame(data)
+    st.dataframe(df)
+    if not df.empty:
+        st.download_button("Fatura CSV İndir", data=df.to_csv(index=False).encode('utf-8'), file_name='invoices.csv')
+        try:
+            import io
+            towrite = io.BytesIO()
+            df.to_excel(towrite, index=False, engine='openpyxl')
+            towrite.seek(0)
+            st.download_button("Fatura Excel İndir", data=towrite, file_name='invoices.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        except Exception:
+            st.error('Excel oluşturulamadı; openpyxl yüklü olmalı.')
+    s2.close()
