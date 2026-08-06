@@ -16,18 +16,12 @@ def document(**overrides):
         "invoice_number": "INV-1", "document_date": "2026-08-07",
         "voucher_number": "V-1", "booking_number": "B-1", "tour_name": "Efes",
         "service_date": "2026-08-07", "passenger_count": 2, "adult_count": 2,
-<<<<<<< HEAD
-        "child_count": 0, "currency": "TRY", "unit_price": 100,
-        "subtotal": 200, "tax_amount": 40, "grand_total": 240,
-        "paid_amount": 100, "remaining_amount": 140, "confidence": 0.95,
-=======
         "child_count": 0, "guide_count": 0, "driver_count": 0,
         "free_person_count": 0, "currency": "TRY", "unit_price": 100,
         "subtotal": 200, "tax_amount": 40, "grand_total": 240,
         "paid_amount": 100, "remaining_amount": 140, "payment_method": "Havale",
         "notes": None, "additional_charges": 0, "discounts": 0, "tax_rate": 20,
         "confidence": 0.95,
->>>>>>> origin/main
         "unreadable_fields": [],
     }
     base.update(overrides)
@@ -69,8 +63,6 @@ class ReconciliationEngineTests(unittest.TestCase):
         result = self.engine.reconcile(document(currency="EUR"), agency())
         self.assertTrue(any(item["field"] == "currency" for item in result["field_differences"]))
 
-<<<<<<< HEAD
-=======
     def test_date_mismatch(self):
         result = self.engine.reconcile(document(service_date="2026-08-12"), agency())
         self.assertTrue(any(item["field"] == "service_date" for item in result["field_differences"]))
@@ -90,7 +82,6 @@ class ReconciliationEngineTests(unittest.TestCase):
         self.assertIn("tax_calculation", fields)
         self.assertIn("total_calculation", fields)
 
->>>>>>> origin/main
     def test_rounding_tolerance(self):
         result = ReconciliationEngine(amount_tolerance=Decimal("0.05")).reconcile(document(grand_total=240.02), agency())
         self.assertEqual(result["status"], "Tam Eşleşti")
@@ -111,11 +102,6 @@ class ExtractorFailureTests(unittest.TestCase):
             extractor.extract(b"fake", "receipt.png", "image/png")
 
     def test_strict_schema_response(self):
-<<<<<<< HEAD
-        payload = document()
-        extractor = OpenRouterDocumentExtractor("test", transport=lambda request: {"choices": [{"message": {"content": json.dumps(payload)}}]})
-        self.assertEqual(set(extractor.extract(b"fake", "receipt.png", "image/png")), set(EXTRACTION_FIELDS))
-=======
         import fitz
         pdf = fitz.open()
         page = pdf.new_page()
@@ -124,7 +110,6 @@ class ExtractorFailureTests(unittest.TestCase):
         payload = document()
         extractor = OpenRouterDocumentExtractor("test", transport=lambda request: {"choices": [{"message": {"content": json.dumps(payload)}}]})
         self.assertEqual(set(extractor.extract(file_bytes, "invoice.pdf", "application/pdf")), set(EXTRACTION_FIELDS))
->>>>>>> origin/main
 
 
 if __name__ == "__main__":

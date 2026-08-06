@@ -4,17 +4,11 @@ import re
 import unicodedata
 import urllib.request
 from datetime import datetime
-<<<<<<< HEAD
-from decimal import Decimal
-from io import BytesIO
-from pathlib import Path
-=======
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import Path
 
->>>>>>> origin/main
 import pandas as pd
 from sqlalchemy import func
 
@@ -80,71 +74,6 @@ INTEGER_FIELDS = {"passenger_count", "adult_count", "child_count", "capacity"}
 DATE_FIELDS = {"transaction_date", "due_date", "service_date"}
 
 
-<<<<<<< HEAD
-class ExcelImportService:
-    @staticmethod
-    def get_sheet_names(file_bytes, filename):
-        extension = Path(filename).suffix.lower()
-        if extension == ".csv":
-            return ["CSV"]
-        engine = "xlrd" if extension == ".xls" else "openpyxl"
-        return pd.ExcelFile(BytesIO(file_bytes), engine=engine).sheet_names
-
-    @staticmethod
-    def load_dataframe(file_bytes, filename, sheet_name=None):
-        extension = Path(filename).suffix.lower()
-        if extension == ".csv":
-            return pd.read_csv(BytesIO(file_bytes))
-        engine = "xlrd" if extension == ".xls" else "openpyxl"
-        return pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine=engine)
-
-
-class ColumnMappingService:
-    ALIASES = {
-        "transaction_date": ["tarih", "işlem tarihi", "belge tarihi"],
-        "due_date": ["vade tarihi", "ödeme tarihi"],
-        "description": ["açıklama", "not"],
-        "currency": ["para birimi", "döviz", "currency"],
-        "income": ["gelir"],
-        "expense": ["gider"],
-        "party_name": ["müşteri", "tedarikçi", "firma", "taraf"],
-        "transaction_type": ["işlem türü", "tür", "type"],
-        "invoice_number": ["fatura", "belge no", "invoice"],
-        "booking_number": ["rezervasyon", "booking"],
-        "tour": ["tur"],
-        "grand_total": ["tutar", "toplam", "genel toplam"],
-        "tax_total": ["kdv", "vergiler", "vergi"],
-        "payment_status": ["ödeme durumu", "tahsilat durumu", "durum"],
-    }
-
-    @classmethod
-    def guess(cls, columns, field_keys):
-        mapping = {}
-        normalized = [(column, normalize_column_name(column) or "") for column in columns]
-        for field_key in field_keys:
-            mapping[field_key] = "<Boş>"
-            for column, name in normalized:
-                if name == field_key or any(alias in name for alias in cls.ALIASES.get(field_key, [])):
-                    mapping[field_key] = column
-                    break
-        return mapping
-
-
-class DuplicateCheckService:
-    @staticmethod
-    def transaction_exists(session, transaction_model, row):
-        invoice_number = row.get("invoice_number")
-        if not invoice_number:
-            return False
-        return session.query(transaction_model).filter(
-            transaction_model.invoice_number == invoice_number,
-            transaction_model.party_name == row.get("party_name"),
-        ).first() is not None
-
-
-def normalize_column_name(name):
-    if not isinstance(name, str):
-=======
 def normalize_column_name(value):
     text = str(value or "").strip().lower().translate(str.maketrans("çğıöşü", "cgiosu"))
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
@@ -354,7 +283,6 @@ class DuplicateDetectionService:
         if row.get("invoice_number") and session.query(Transaction).filter(Transaction.invoice_number == row["invoice_number"]).first(): return "Fatura numarası mevcut"
         if row.get("voucher_number") and (session.query(Voucher).filter(Voucher.voucher_number == row["voucher_number"]).first() or session.query(Booking).filter(Booking.voucher_number == row["voucher_number"]).first()): return "Voucher numarası mevcut"
         if row.get("booking_number") and dataset_type == "Rezervasyon" and session.query(Booking).filter(Booking.booking_number == row["booking_number"]).first(): return "Rezervasyon numarası mevcut"
->>>>>>> origin/main
         return None
 
 
