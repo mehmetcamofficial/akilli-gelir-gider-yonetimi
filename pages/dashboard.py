@@ -1,12 +1,14 @@
 import streamlit as st
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func
 from database.db import engine
 import pandas as pd
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
-from database.models import InvoiceItem, Product, Transaction
+from database.models import InvoiceItem, Product, Transaction, Category
+import plotly.express as px
 
 
 def _load_transactions():
@@ -142,3 +144,52 @@ def show():
             st.info("Ürün verisi olmadığından uyarı yapılamıyor.")
     except Exception as e:
         st.error(f"Uyarılar hesaplanırken hata: {e}")
+
+    # Cashflow and category visuals
+    st.subheader("Aylık Nakit Akışı")
+    sess2 = sessionmaker(bind=engine)
+    s = sess2()
+    try:
+        txs = s.query(Transaction).filter(Transaction.is_deleted==False).filter(Transaction.transaction_date >= start_date).filter(Transaction.transaction_date <= end_date).all()
+        if txs:
+            dfc = pd.DataFrame([{'date': t.transaction_date, 'type': t.transaction_type, 'amount': float(t.grand_total or 0)} for t in txs])
+            dfc['month'] = pd.to_datetime(dfc['date']).dt.to_period('M').astype(str)
+            mon = dfc.groupby(['month','type']).agg({'amount':'sum'}).reset_index()
+            pivot2 = mon.pivot(index='month', columns='type', values='amount').fillna(0)
+            st.plotly_chart(px.line(pivot2, labels={'index':'Ay','value':'Tutar','variable':'Tür'}), use_container_width=True)
+        else:
+            st.info('Seçilen dönemde kayıt yok.')
+    except Exception as e:
+        st.error(f'Nakit akışı oluşturulurken hata: {e}')
+
+    st.subheader('Gider Kategorileri Dağılımı')
+    try:
+        # consider expenses (transaction_type == 'expense' or invoice_type == 'purchase')
+        q = s.query(Transaction, Category).join(Category, Transaction.category_id==Category.id, isouter=True).filter(Transaction.is_deleted==False).filter(Transaction.transaction_date >= start_date).filter(Transaction.transaction_date <= end_date)
+        data = {}
+        for t, c in q:
+            key = c.name if c else 'Diğer'
+            if t.transaction_type == 'expense' or (t.invoice_type and t.invoice_type=='purchase'):
+                data[key] = data.get(key, 0) + float(t.grand_total or 0)
+        if data:
+            dfcat = pd.DataFrame([{'category': k, 'amount': v} for k,v in data.items()])
+            fig = px.pie(dfcat, names='category', values='amount', title='Gider Kategorileri')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info('Bu dönemde gider kaydı bulunamadı.')
+    except Exception as e:
+        st.error(f'Kategori grafiği oluşturulurken hata: {e}')
+
+    st.subheader('Ödeme Durumu Dağılımı')
+    try:
+        q2 = s.query(Transaction.payment_status, func.count(Transaction.id)).filter(Transaction.is_deleted==False).group_by(Transaction.payment_status).all()
+        if q2:
+            dfps = pd.DataFrame(q2, columns=['payment_status','count'])
+            fig2 = px.pie(dfps, names='payment_status', values='count', title='Ödeme Durumu Dağılımı')
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info('Ödeme durumu verisi yok.')
+    except Exception as e:
+        st.error(f'Ödeme durumu hesaplanırken hata: {e}')
+    finally:
+        s.close()
