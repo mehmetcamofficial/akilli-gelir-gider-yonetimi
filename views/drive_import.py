@@ -1,10 +1,7 @@
-<<<<<<< HEAD
-=======
 import hashlib
 import json
 from datetime import datetime
 from io import BytesIO
->>>>>>> origin/main
 from pathlib import Path
 
 import pandas as pd
@@ -31,19 +28,8 @@ from services.google_drive_config import (
     list_drive_files,
 )
 from services.google_drive_service import ALLOWED_MIME_TYPES
-<<<<<<< HEAD
-from services.drive_import_service import (
-    ColumnMappingService,
-    DuplicateCheckService,
-    ExcelImportService,
-    parse_decimal,
-    parse_date,
-)
-from utils.ui import page_header, section_header, empty_state
-=======
 from utils.ui import empty_state, page_header, section_header
 
->>>>>>> origin/main
 
 SUPPORTED_EXTENSIONS = [".xlsx", ".xls", ".csv"]
 Session = sessionmaker(bind=engine)
@@ -72,63 +58,6 @@ def _human_readable_size(size):
     return f"{size:.1f} TB"
 
 
-<<<<<<< HEAD
-def _save_import_rows(rows):
-    session = sessionmaker(bind=engine)()
-    try:
-        imported, skipped = 0, 0
-        for raw in rows:
-            if DuplicateCheckService.transaction_exists(session, Transaction, raw):
-                skipped += 1
-                continue
-            txn = Transaction(
-                transaction_type=raw.get("transaction_type", "income"),
-                transaction_date=raw.get("transaction_date") or datetime.utcnow(),
-                due_date=raw.get("due_date"),
-                invoice_number=raw.get("invoice_number") or None,
-                description=raw.get("description") or None,
-                party_name=raw.get("party_name") or None,
-                currency=raw.get("currency", "TRY"),
-                exchange_rate=1,
-                subtotal=raw.get("subtotal", parse_decimal(0)),
-                tax_total=raw.get("tax_total", parse_decimal(0)),
-                grand_total=raw.get("grand_total", parse_decimal(0)),
-                paid_amount=parse_decimal(0),
-                remaining_amount=raw.get("grand_total", parse_decimal(0)),
-                payment_status=raw.get("payment_status", "Ödenmedi"),
-                invoice_type="sale" if raw.get("transaction_type") == "income" else "purchase",
-            )
-            if raw.get("booking_number"):
-                booking = session.query(Booking).filter(
-                    Booking.booking_number == raw["booking_number"]
-                ).first()
-                if booking:
-                    txn.description = (
-                        f"{txn.description or ''} | Rezervasyon: {booking.booking_number}".strip(" | ")
-                    )
-            session.add(txn)
-            imported += 1
-        session.commit()
-        return imported, skipped
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-
-def _get_sheet_names(file_bytes, filename):
-    return ExcelImportService.get_sheet_names(file_bytes, filename)
-
-
-def _load_dataframe(file_bytes, filename, sheet_name=None):
-    return ExcelImportService.load_dataframe(file_bytes, filename, sheet_name)
-
-
-def _guess_column_mapping(columns):
-    return ColumnMappingService.guess(columns, [field_key for field_key, _ in FIELD_ORDER])
-=======
 def _data_type_label(series):
     values = series.dropna()
     if values.empty:
@@ -167,7 +96,6 @@ def _excel_bytes(df):
 
 def _analysis_key(prefix):
     return f"{prefix}_smart_import_analysis"
->>>>>>> origin/main
 
 
 def _render_import_workflow(file_bytes, filename, ui_prefix, save_label=None):
@@ -399,108 +327,6 @@ def render_drive_file_list(key_prefix="drive", show_import=True):
         except Exception as exc: st.error(f"Drive dosyası okunamadı veya işlenemedi: {exc}")
 
 
-def _drive_filename(item):
-    name = item.get("name", "Adsız dosya")
-    if item.get("mimeType") == "application/vnd.google-apps.spreadsheet":
-        return f"{Path(name).stem}.xlsx"
-    return name
-
-
-def _is_importable_drive_file(item):
-    return (
-        item.get("mimeType") in ALLOWED_MIME_TYPES
-        or Path(item.get("name", "")).suffix.lower() in SUPPORTED_EXTENSIONS
-    )
-
-
-def render_drive_file_list(key_prefix="drive", show_import=True):
-    """Render the shared Drive file list used by Settings and Excel Import."""
-    initialize_drive_state()
-    files = st.session_state.get("gdrive_files", [])
-    if not files:
-        empty_state(
-            "Dosya bulunamadı",
-            "Bağlı klasörde henüz dosya yok. Klasör paylaşımını ve klasör ID'sini kontrol edin.",
-        )
-        return
-
-    search_term = st.text_input("Dosya ara", key=f"{key_prefix}_file_search").strip().lower()
-    filtered = [item for item in files if search_term in item.get("name", "").lower()]
-    st.markdown("### Google Drive Dosyaları")
-    st.caption(f"{len(filtered)} dosya gösteriliyor.")
-
-    for item in filtered:
-        file_id = item.get("id", "")
-        name = item.get("name", "Adsız dosya")
-        modified = item.get("modifiedTime", "—")
-        if modified != "—":
-            try:
-                modified = datetime.fromisoformat(modified.replace("Z", "+00:00")).strftime(
-                    "%d.%m.%Y %H:%M"
-                )
-            except ValueError:
-                pass
-        importable = _is_importable_drive_file(item)
-        info_col, open_col, preview_col, download_col, import_col = st.columns([5, 1, 1, 1, 1])
-        with info_col:
-            st.markdown(f"**Dosya Adı:** {name}")
-            st.caption(
-                f"Dosya Türü: {_format_drive_file_type(item.get('mimeType'))} • "
-                f"Son Değiştirilme: {modified} • Dosya Boyutu: {_human_readable_size(item.get('size'))}"
-            )
-            st.code(f"Drive Dosya ID: {file_id}", language=None)
-        with open_col:
-            if item.get("webViewLink"):
-                st.link_button("Drive'da Aç", item["webViewLink"])
-        with preview_col:
-            if st.button("Önizle", key=f"{key_prefix}_preview_{file_id}", disabled=not importable):
-                st.session_state[f"{key_prefix}_selected_file_id"] = file_id
-        with download_col:
-            if st.button("İndir", key=f"{key_prefix}_prepare_download_{file_id}"):
-                try:
-                    buffer = download_drive_file(file_id, item.get("mimeType"))
-                    st.session_state[f"{key_prefix}_download"] = {
-                        "id": file_id,
-                        "name": _drive_filename(item),
-                        "bytes": buffer.getvalue(),
-                    }
-                except Exception as exc:
-                    st.error(f"Dosya indirilemedi: {exc}")
-        with import_col:
-            if st.button(
-                "İçe Aktar",
-                key=f"{key_prefix}_import_{file_id}",
-                disabled=not importable or not show_import,
-            ):
-                st.session_state[f"{key_prefix}_selected_file_id"] = file_id
-
-    prepared = st.session_state.get(f"{key_prefix}_download")
-    if prepared:
-        st.download_button(
-            f"{prepared['name']} dosyasını kaydet",
-            data=prepared["bytes"],
-            file_name=prepared["name"],
-            key=f"{key_prefix}_download_ready_{prepared['id']}",
-        )
-
-    selected_id = st.session_state.get(f"{key_prefix}_selected_file_id")
-    selected_file = next((item for item in files if item.get("id") == selected_id), None)
-    if not selected_file:
-        return
-    st.markdown("---")
-    st.subheader(f"{selected_file['name']} — Önizleme ve İçe Aktarma")
-    try:
-        buffer = download_drive_file(selected_file["id"], selected_file["mimeType"])
-        _render_import_workflow(
-            buffer.getvalue(),
-            _drive_filename(selected_file),
-            f"{key_prefix}_{selected_file['id']}",
-            "Drive'dan Verileri Kaydet",
-        )
-    except Exception as exc:
-        st.error(f"Drive dosyası okunamadı veya işlenemedi: {exc}")
-
-
 def render_drive_import():
     page_header("Excel Veri Aktarımı", "Excel/CSV dosyanızı güvenli biçimde analiz edin, doğrulayın ve doğru kayıtlara aktarın.")
     st.subheader("Bilgisayardan Yükle")
@@ -523,9 +349,4 @@ def render_drive_import():
         except Exception as exc:
             st.error(f"Drive dosyaları yenilenemedi: {exc}")
             return
-<<<<<<< HEAD
-    with status_col:
-        st.write(f"**{len(st.session_state.gdrive_files)} dosya hazır**")
-=======
->>>>>>> origin/main
     render_drive_file_list(key_prefix="drive_import", show_import=True)
