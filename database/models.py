@@ -58,6 +58,38 @@ class Document(Base):
     transaction = relationship("Transaction", back_populates="documents")
 
 
+class DocumentReconciliation(Base):
+    __tablename__ = "document_reconciliations"
+    id = Column(Integer, primary_key=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    document_hash = Column(String(128), nullable=False, index=True)
+    extracted_json = Column(Text, nullable=False)
+    matched_entity_type = Column(String(100), nullable=True)
+    matched_entity_id = Column(Integer, nullable=True)
+    status = Column(String(100), nullable=False)
+    severity = Column(String(50), nullable=False)
+    differences_json = Column(Text, nullable=False)
+    expected_total = Column(Numeric(18, 2), nullable=True)
+    document_total = Column(Numeric(18, 2), nullable=True)
+    difference_amount = Column(Numeric(18, 2), nullable=True)
+    difference_percentage = Column(Numeric(18, 4), nullable=True)
+    recommended_action = Column(Text, nullable=True)
+    user_action = Column(String(100), nullable=True)
+    user_note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    entity_type = Column(String(100), nullable=True)
+    entity_id = Column(Integer, nullable=True)
+    details_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class InvoiceItem(Base):
     __tablename__ = "invoice_items"
     id = Column(Integer, primary_key=True)
