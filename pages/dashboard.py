@@ -117,3 +117,28 @@ def show():
         st.info("Seçilen tarihler arasında satış verisi yok veya ürün eşleşmesi bulunmuyor.")
 
     session.close()
+
+    # Advanced alerts: low margin and loss-making products
+    st.subheader("Kâr Marjı Uyarıları")
+    try:
+        threshold_pct = st.number_input("Düşük kâr marjı eşiği (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
+        if rows:
+            lm = pdf[pdf['margin_pct'] < float(threshold_pct)].sort_values('margin_pct')
+            loss = pdf[pdf['profit'] < 0].sort_values('profit')
+            if not lm.empty:
+                st.warning(f"Düşük kâr marjlı ürünler (<{threshold_pct}%)")
+                st.dataframe(lm)
+                st.download_button("Düşük Kâr CSV", data=lm.to_csv(index=False).encode('utf-8'), file_name='low_margin_products.csv')
+            else:
+                st.success("Düşük kâr marjlı ürün bulunmuyor.")
+
+            if not loss.empty:
+                st.error("Zarar eden ürünler")
+                st.dataframe(loss)
+                st.download_button("Zarar Eden CSV", data=loss.to_csv(index=False).encode('utf-8'), file_name='loss_products.csv')
+            else:
+                st.info("Zarar eden ürün bulunmuyor.")
+        else:
+            st.info("Ürün verisi olmadığından uyarı yapılamıyor.")
+    except Exception as e:
+        st.error(f"Uyarılar hesaplanırken hata: {e}")
