@@ -131,38 +131,79 @@ def show():
     if submitted:
         try:
             # validations
-            if is_duplicate_invoice(session, invoice_number, party):
+            if is_duplicate_invoice(session, invoice_number, party) and not editing_id:
                 st.warning("Aynı fatura numarası bu firma için zaten kayıtlı.")
 
             sums = validate_line_totals(st.session_state.invoice_rows)
             if grand_total_input and abs(Decimal(str(grand_total_input)) - sums['grand_total']) > Decimal('0.5'):
                 st.error(f"Elle girilmiş toplam ({grand_total_input}) ile hesaplanan toplam ({sums['grand_total']}) arasında fark var.")
             else:
-                txn = Transaction(
-                    transaction_type="income" if sums['grand_total']>=0 else "expense",
-                    invoice_type=invoice_type,
-                    transaction_date=inv_date,
-                    document_date=inv_date,
-                    due_date=due_date,
-                    invoice_number=invoice_number or None,
-                    description=f"Fatura: {invoice_number}",
-                    party_name=party or None,
-                    currency=currency,
-                    subtotal=sums['subtotal'],
-                    tax_total=sums['tax_total'],
-                    grand_total=sums['grand_total'],
-                    paid_amount=Decimal('0.00'),
-                    remaining_amount=sums['grand_total'],
-                    payment_status="Ödenmedi",
-                )
-                session.add(txn)
-                session.commit()
-                session.refresh(txn)
+                if editing_id:
+                    # update existing transaction
+                    txn = session.query(Transaction).filter(Transaction.id == int(editing_id)).first()
+                    if not txn:
+                        st.error("Düzenlenecek fatura bulunamadı.")
+                    else:
+                        # revert stock effects of old items
+                        old_items = session.query(InvoiceItem).filter(InvoiceItem.invoice_id == txn.id).all()
+                        from services.product_service import adjust_stock_delta
+                        for oi in old_items:
+                            if oi.product_id:
+                                # revert depending on invoice_type
+                                if txn.invoice_type == 'purchase':
+                                    # previously increased stock -> reduce
+                                    adjust_stock_delta(session, int(oi.product_id), -Decimal(str(oi.quantity)), invoice_id=txn.id, movement_type='revert_purchase')
+                                else:
+                                    # previously sale reduced stock -> increase
+                                    adjust_stock_delta(session, int(oi.product_id), Decimal(str(oi.quantity)), invoice_id=txn.id, movement_type='revert_sale')
+                        # delete old items
+                        session.query(InvoiceItem).filter(InvoiceItem.invoice_id == txn.id).delete()
+                        session.commit()
 
-                # save invoice items
+                        # update txn fields
+                        txn.invoice_type = invoice_type
+                        txn.transaction_date = inv_date
+                        txn.document_date = inv_date
+                        txn.due_date = due_date
+                        txn.invoice_number = invoice_number or None
+                        txn.description = f"Fatura (güncellendi): {invoice_number}"
+                        txn.party_name = party or None
+                        txn.currency = currency
+                        txn.subtotal = sums['subtotal']
+                        txn.tax_total = sums['tax_total']
+                        txn.grand_total = sums['grand_total']
+                        txn.remaining_amount = sums['grand_total']
+                        session.add(txn)
+                        session.commit()
+                        session.refresh(txn)
+                        new_txn = txn
+                else:
+                    # create new transaction
+                    new_txn = Transaction(
+                        transaction_type="income" if sums['grand_total']>=0 else "expense",
+                        invoice_type=invoice_type,
+                        transaction_date=inv_date,
+                        document_date=inv_date,
+                        due_date=due_date,
+                        invoice_number=invoice_number or None,
+                        description=f"Fatura: {invoice_number}",
+                        party_name=party or None,
+                        currency=currency,
+                        subtotal=sums['subtotal'],
+                        tax_total=sums['tax_total'],
+                        grand_total=sums['grand_total'],
+                        paid_amount=Decimal('0.00'),
+                        remaining_amount=sums['grand_total'],
+                        payment_status="Ödenmedi",
+                    )
+                    session.add(new_txn)
+                    session.commit()
+                    session.refresh(new_txn)
+
+                # save invoice items for new_txn
                 for r in st.session_state.invoice_rows:
                     item = InvoiceItem(
-                        invoice_id=txn.id,
+                        invoice_id=new_txn.id,
                         description=r.get('description'),
                         quantity=Decimal(str(r.get('quantity',0))),
                         unit=r.get('unit'),
@@ -181,17 +222,20 @@ def show():
                         qty = Decimal(str(r.get('quantity',0)))
                         unit_price = Decimal(str(r.get('unit_price',0)))
                         if pid:
-                            # infer type: income -> sale (reduce stock); expense -> purchase (increase stock)
-                            if txn.transaction_type == 'income':
-                                record_sale_and_reduce_stock(session, int(pid), qty, invoice_id=txn.id)
+                            if new_txn.invoice_type == 'sale':
+                                record_sale_and_reduce_stock(session, int(pid), qty, invoice_id=new_txn.id)
                             else:
-                                update_purchase_price_and_stock(session, int(pid), qty, unit_price, invoice_id=txn.id)
+                                update_purchase_price_and_stock(session, int(pid), qty, unit_price, invoice_id=new_txn.id)
                     except Exception:
                         pass
                 session.commit()
 
                 if uploaded_file is not None:
-                    save_uploaded_file(uploaded_file, "income", session, transaction_id=txn.id)
+                    save_uploaded_file(uploaded_file, "income", session, transaction_id=new_txn.id)
+
+                # clear editing state
+                if editing_id:
+                    st.session_state.pop('editing_invoice_id', None)
 
                 st.success("Fatura kaydedildi ve kalemler ilişkilendirildi.")
                 # reset rows

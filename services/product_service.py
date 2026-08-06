@@ -46,3 +46,17 @@ def record_sale_and_reduce_stock(session: Session, product_id: int, qty: Decimal
     session.commit()
     session.refresh(product)
     return product
+
+
+def adjust_stock_delta(session: Session, product_id: int, delta_qty: Decimal, invoice_id: int = None, movement_type: str = 'adjust'):
+    """Apply a positive or negative delta to product.stock and record a StockMovement."""
+    product = session.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        return
+    product.stock = Decimal(product.stock or 0) + Decimal(delta_qty)
+    sm = StockMovement(product_id=product.id, qty=Decimal(delta_qty), movement_type=movement_type, related_invoice_id=invoice_id)
+    session.add(sm)
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return product
