@@ -66,6 +66,69 @@ def _draw_footer(c):
     c.drawRightString(width - 15 * mm, 10 * mm, footer_text)
 
 
+def _draw_table(c, x_start, y_start, col_widths, headers, rows, row_height=6 * mm, rows_per_page=40, logo_path=None, title=None):
+    """Draws a simple table with borders. Returns when finished."""
+    width, height = A4
+    x = x_start
+    y = y_start
+    # draw header
+    c.setFont('Helvetica-Bold', 9)
+    padding = 2 * mm
+    # vertical lines positions
+    vpos = [x]
+    for w in col_widths:
+        vpos.append(vpos[-1] + w)
+
+    def draw_table_grid(current_y, num_rows_on_page):
+        # horizontal lines
+        top = current_y
+        bottom = current_y - (num_rows_on_page + 1) * row_height
+        # draw outer rect
+        c.line(x_start, top, vpos[-1], top)
+        c.line(x_start, bottom, vpos[-1], bottom)
+        # verticals
+        for xp in vpos:
+            c.line(xp, top, xp, bottom)
+
+    # Draw header row text
+    for i, h in enumerate(headers):
+        tx = vpos[i] + padding
+        c.drawString(tx, y, str(h))
+    y -= row_height
+    c.setFont('Helvetica', 9)
+
+    row_count = 0
+    page_row_count = 0
+    for r in rows:
+        if page_row_count >= rows_per_page:
+            # finish page
+            draw_table_grid(y + (rows_per_page + 1) * row_height, rows_per_page)
+            _draw_footer(c)
+            c.showPage()
+            if title or logo_path:
+                _draw_header(c, title or '', logo_path=logo_path)
+            y = y_start - row_height
+            c.setFont('Helvetica', 9)
+            page_row_count = 0
+        # draw row cells
+        for i, cell in enumerate(r):
+            tx = vpos[i] + padding
+            # right align numbers
+            try:
+                # numeric?
+                float(cell)
+                c.drawRightString(vpos[i+1] - padding, y, str(cell))
+            except Exception:
+                c.drawString(tx, y, str(cell))
+        y -= row_height
+        row_count += 1
+        page_row_count += 1
+
+    # final grid for last page
+    draw_table_grid(y + (page_row_count + 1) * row_height, page_row_count)
+
+
+
 def generate_product_profitability_pdf(session, start_date, end_date, logo_path=None):
     """Return PDF bytes for product profitability between dates."""
     font_name = _register_dejavu()
@@ -102,19 +165,15 @@ def generate_product_profitability_pdf(session, start_date, end_date, logo_path=
         y -= 7 * mm
         c.setFont('Helvetica', 10)
 
+        # prepare rows for table helper
+        table_rows = []
         for name, vals in rows.items():
-            if y < 30 * mm:
-                _draw_footer(c)
-                c.showPage()
-                _draw_header(c, title, logo_path=logo_path)
-                y = y_start - 10 * mm
             profit = vals['revenue'] - vals['cost']
-            c.drawString(20 * mm, y, str(name))
-            c.drawRightString(130 * mm, y, _format_currency(vals['qty']))
-            c.drawRightString(160 * mm, y, _format_currency(vals['revenue']))
-            c.drawRightString(190 * mm, y, _format_currency(vals['cost']))
-            c.drawRightString(210 * mm, y, _format_currency(profit))
-            y -= 6 * mm
+            table_rows.append([name, _format_currency(vals['qty']), _format_currency(vals['revenue']), _format_currency(vals['cost']), _format_currency(profit)])
+
+        col_widths = [75 * mm, 25 * mm, 30 * mm, 30 * mm, 30 * mm]
+        headers = ['Ürün', 'Adet', 'Gelir', 'Maliyet', 'Kâr']
+        _draw_table(c, 20 * mm, y + 7 * mm, col_widths, headers, table_rows, row_height=7 * mm, rows_per_page=30, logo_path=logo_path, title=title)
     except Exception:
         c.drawString(20 * mm, y, 'Veri alınamadı veya modeller yüklenemedi.')
 
@@ -147,20 +206,15 @@ def generate_invoice_list_pdf(session, start_date, end_date, logo_path=None):
         c.drawString(140 * mm, y, 'Tür')
         c.drawRightString(205 * mm, y, 'Tutar')
         y -= 7 * mm
-        c.setFont('Helvetica', 10)
+        # build rows for table helper
+        table_rows = []
         for t in txs:
-            if y < 30 * mm:
-                _draw_footer(c)
-                c.showPage()
-                _draw_header(c, title, logo_path=logo_path)
-                y = y_start - 10 * mm
             date_str = t.transaction_date.strftime('%d.%m.%Y') if hasattr(t.transaction_date, 'strftime') else str(t.transaction_date)
-            c.drawString(20 * mm, y, date_str)
-            c.drawString(55 * mm, y, str(t.invoice_number or ''))
-            c.drawString(85 * mm, y, str(t.party_name or ''))
-            c.drawString(140 * mm, y, str(t.transaction_type or ''))
-            c.drawRightString(205 * mm, y, _format_currency(t.grand_total or 0))
-            y -= 6 * mm
+            table_rows.append([date_str, str(t.invoice_number or ''), str(t.party_name or ''), str(t.transaction_type or ''), _format_currency(t.grand_total or 0)])
+
+        col_widths = [30 * mm, 30 * mm, 60 * mm, 30 * mm, 30 * mm]
+        headers = ['Tarih', 'No', 'Taraf', 'Tür', 'Tutar']
+        _draw_table(c, 20 * mm, y + 7 * mm, col_widths, headers, table_rows, row_height=7 * mm, rows_per_page=30, logo_path=logo_path, title=title)
     except Exception:
         c.drawString(20 * mm, y, 'İşlem verisi alınırken hata oluştu.')
 
