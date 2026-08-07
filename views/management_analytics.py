@@ -7,7 +7,7 @@ import streamlit as st
 from sqlalchemy.orm import sessionmaker
 
 from database.db import engine
-from database.models import Booking, Customer, Guide, Hotel, SalesChannel, Staff, Supplier, Tour, Transaction
+from database.models import Booking, Customer, Guide, Hotel, SalesChannel, Staff, Supplier, Tour, Transaction, CurrentAccount, CurrentAccountMovement, OpenItem, AccountReconciliation
 from services.analytics_service import (
     AnalyticsExportService, AnalyticsFilters, AnalyticsQueryService,
     AnomalyDetectionService, FinancialAnalyticsService, ForecastingService,
@@ -226,6 +226,13 @@ def render_management_analytics():
         insights = ManagementInsightService.build(current_metrics, previous_metrics, supplier_frame, rec_metrics)
         section_header("Yönetim İçgörüleri")
         for insight in insights: st.info(insight)
+
+        section_header("Cari Hesap Analitiği")
+        accounts=session.query(CurrentAccount).all();movements=session.query(CurrentAccountMovement).all();open_items=session.query(OpenItem).filter(OpenItem.remaining_amount>0).all();customer_ids={x.id for x in accounts if x.customer_id};supplier_ids={x.id for x in accounts if x.supplier_id};receivables=sum((row.remaining_amount for row in open_items if row.account_id in customer_ids),0);payables=sum((row.remaining_amount for row in open_items if row.account_id in supplier_ids),0);overdue=sum((row.remaining_amount for row in open_items if row.due_date and row.due_date.date()<date.today()),0);disputed=session.query(AccountReconciliation).filter_by(status="Mutabık Değil").all();account_cols=st.columns(5);account_cols[0].metric("Toplam Alacak",format_currency(receivables));account_cols[1].metric("Toplam Borç",format_currency(payables));account_cols[2].metric("Gecikmiş Oran",f"%{(float(overdue/(receivables+payables))*100 if receivables+payables else 0):.1f}");account_cols[3].metric("Cari Hareket",len(movements));account_cols[4].metric("İhtilaflı Tutar",format_currency(sum((abs(x.closing_balance) for x in disputed),0)))
+        balance_rows=[]
+        for account in accounts:
+            rows=[x for x in movements if x.account_id==account.id];balance_rows.append({"Cari":account.name,"Tür":account.account_type,"Bakiye":float(sum((x.debit-x.credit for x in rows),0))})
+        if balance_rows:st.plotly_chart(px.bar(pd.DataFrame(balance_rows).sort_values("Bakiye",ascending=False).head(20),x="Cari",y="Bakiye",color="Tür",title="En Yüksek Cari Bakiyeler"),use_container_width=True)
 
         section_header("Dışa Aktarım")
         tables = {"Finansal Trend": monthly, "Tur Karliligi": tour_frame, "Tedarikciler": supplier_frame, "Mutabakat Durumlari": rec_status, "Mutabakat Sorunlari": rec_differences, "Anomaliler": pd.DataFrame(anomalies)}

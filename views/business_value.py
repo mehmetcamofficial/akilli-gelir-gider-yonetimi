@@ -18,6 +18,15 @@ from services.business_value_service import (
     ContractPriceService, ContractManagementService,
 )
 from services.storage_service import load_document_bytes
+from services.current_account_service import (
+    AccountAnalyticsService, AutomaticAccountReconciliationService,
+    CurrentAccountProjectionService, DailyCurrentAccountService,
+    OpenItemMatchingService,
+)
+from database.models import (
+    CurrentAccount, CurrentAccountMovement, OpenItem, AccountReconciliation,
+    AccountReconciliationDifference, AccountRiskScore,
+)
 from utils.ui import empty_state, page_header
 
 
@@ -37,6 +46,9 @@ def render_daily_work_center():
             "bank_unmatched": "Eşleşmemiş Banka Hareketleri", "critical_reconciliation": "Kritik Mutabakat Farkları",
             "missing_documents": "Eksik Tur Belgeleri", "failed_imports": "Hatalı Aktarımlar",
             "expiring_contracts": "Süresi Yaklaşan Sözleşmeler",
+            "account_receivables_due":"Bugün Vadesi Gelen Alacak","account_payables_due":"Bugün Vadesi Gelen Borç",
+            "overdue_customers":"Vadesi Geçen Müşteri","overdue_suppliers":"Vadesi Geçen Tedarikçi",
+            "unmatched_payments":"Eşleşmeyen Ödeme","pending_account_reconciliations":"Mutabakat Bekleyen Cari",
         }
         cols = st.columns(4)
         for index, key in enumerate(labels):
@@ -228,23 +240,52 @@ def render_tour_budget_analysis():
 
 
 def render_current_account_reconciliation():
-    page_header("Cari Hesap Mutabakatı", "Açılış + faturalar − ödemeler − iadeler formülüyle müşteri veya tedarikçi bakiyesini doğrulayın.")
+    page_header("Cari Hesap Mutabakatı", "Müşteri ve tedarikçi hesaplarını otomatik hesaplayın, açık bakiyeleri kontrol edin, mutabakat oluşturun ve farkları inceleyin.")
     session = SessionLocal()
     try:
-        party_type = st.radio("Cari Türü", ["Tedarikçi", "Müşteri"], horizontal=True)
-        parties = session.query(Supplier if party_type == "Tedarikçi" else Customer).order_by((Supplier.name if party_type == "Tedarikçi" else Customer.first_name)).all()
-        if not parties: empty_state("Cari kayıt bulunamadı", "Önce müşteri veya tedarikçi oluşturun."); return
-        party = st.selectbox("Cari", parties, format_func=lambda item: item.name if party_type == "Tedarikçi" else f"{item.first_name} {item.last_name or ''}")
-        c1, c2, c3 = st.columns(3); start = c1.date_input("Başlangıç", value=date.today().replace(day=1)); end = c2.date_input("Bitiş", value=date.today()); currency = c3.selectbox("Para Birimi", CurrencyManagementService.CURRENCIES)
-        opening = st.number_input("Açılış Bakiyesi", value=0.0, step=0.01)
-        if st.button("Mutabakatı Hesapla ve Kaydet", type="primary"):
-            run = CurrentAccountReconciliationService.run(session, party_type, party.id, start, end, currency, Decimal(str(opening))); st.session_state.last_account_reconciliation = run.id; st.success("Mutabakat hesaplandı ve kaydedildi.")
-        run_id = st.session_state.get("last_account_reconciliation")
-        run = session.get(AccountReconciliationRun, run_id) if run_id else session.query(AccountReconciliationRun).filter_by(party_type=party_type, party_id=party.id, currency=currency).order_by(AccountReconciliationRun.created_at.desc()).first()
-        if run:
-            cols = st.columns(5); cols[0].metric("Açılış", run.opening_balance); cols[1].metric("Faturalar", run.invoice_total); cols[2].metric("Ödemeler", run.payment_total); cols[3].metric("İade/Alacak", run.credit_total); cols[4].metric("Kapanış", run.closing_balance)
-            lines = session.query(AccountReconciliationLine).filter_by(run_id=run.id).order_by(AccountReconciliationLine.entry_date).all()
-            st.dataframe(pd.DataFrame([{"Tarih": x.entry_date, "Tür": x.entry_type, "Referans": x.reference, "Borç": x.debit, "Alacak": x.credit, "Bakiye": x.running_balance} for x in lines]), hide_index=True, use_container_width=True)
+        if st.button("Kayıtları Şimdi Yenile",type="primary"):
+            result=DailyCurrentAccountService.refresh(session);st.success(f"{result['movements_created']} yeni hareket, {result['matches_created']} eşleşme işlendi.");st.rerun()
+        CurrentAccountProjectionService.get_or_create_accounts(session);accounts=session.query(CurrentAccount).filter_by(active=True).order_by(CurrentAccount.name).all()
+        if not accounts:empty_state("Cari hesap bulunamadı","Müşteri veya tedarikçi ekleyin.");return
+        today=datetime.utcnow();customer_ids=[x.id for x in accounts if x.customer_id];supplier_ids=[x.id for x in accounts if x.supplier_id]
+        def balance(ids,overdue=False):
+            q=session.query(OpenItem).filter(OpenItem.account_id.in_(ids),OpenItem.remaining_amount>0) if ids else session.query(OpenItem).filter(False)
+            if overdue:q=q.filter(OpenItem.due_date<today)
+            return sum((Decimal(str(x.remaining_amount)) for x in q.all()),Decimal("0"))
+        unmatched=session.query(CurrentAccountMovement).filter_by(status="Eşleşmeyen").count();pending=session.query(AccountReconciliation).filter(AccountReconciliation.status.in_(["Hazırlanıyor","Gönderime Hazır","Cevap Bekleniyor"])).count();cards=st.columns(6);cards[0].metric("Toplam Müşteri Alacağı",balance(customer_ids));cards[1].metric("Toplam Tedarikçi Borcu",balance(supplier_ids));cards[2].metric("Vadesi Geçmiş Alacak",balance(customer_ids,True));cards[3].metric("Vadesi Geçmiş Borç",balance(supplier_ids,True));cards[4].metric("Eşleşmeyen Hareket",unmatched);cards[5].metric("Mutabakat Bekleyen Cari",pending)
+        f1,f2,f3=st.columns(3);start=f1.date_input("Başlangıç",date.today().replace(day=1));end=f2.date_input("Bitiş",date.today());currency=f3.selectbox("Para Birimi",CurrencyManagementService.CURRENCIES)
+        tabs=st.tabs(["Tüm Cariler","Müşteri Carileri","Tedarikçi Carileri","Açık Kalemler","Vadesi Geçmişler","Mutabakatlar","Farklı Kayıtlar"])
+        def account_table(rows):
+            data=[]
+            for account in rows:
+                movements=session.query(CurrentAccountMovement).filter_by(account_id=account.id,currency=currency).all();debit=sum((Decimal(str(x.debit)) for x in movements),Decimal("0"));credit=sum((Decimal(str(x.credit)) for x in movements),Decimal("0"));risk=session.query(AccountRiskScore).filter_by(account_id=account.id).order_by(AccountRiskScore.score_date.desc()).first();data.append({"Cari":account.name,"Tür":account.account_type,"Borç":debit,"Alacak":credit,"Bakiye":debit-credit,"Risk":risk.risk_level if risk else "Hesaplanmadı"})
+            st.dataframe(pd.DataFrame(data),hide_index=True,use_container_width=True)
+        with tabs[0]:account_table(accounts)
+        with tabs[1]:account_table([x for x in accounts if x.customer_id])
+        with tabs[2]:account_table([x for x in accounts if x.supplier_id])
+        with tabs[3]:
+            items=session.query(OpenItem).filter(OpenItem.remaining_amount>0,OpenItem.currency==currency).all();st.dataframe(pd.DataFrame([{"Cari":session.get(CurrentAccount,x.account_id).name,"Fatura":x.invoice_number,"Toplam":x.original_amount,"Eşleşen":x.matched_amount,"Kalan":x.remaining_amount,"Vade":x.due_date,"Gecikme":max((today.date()-x.due_date.date()).days,0) if x.due_date else 0,"Durum":x.status} for x in items]),hide_index=True,use_container_width=True)
+        with tabs[4]:
+            overdue=session.query(OpenItem).filter(OpenItem.remaining_amount>0,OpenItem.currency==currency,OpenItem.due_date<today).all();st.dataframe(pd.DataFrame([{"Cari":session.get(CurrentAccount,x.account_id).name,"Fatura":x.invoice_number,"Kalan":x.remaining_amount,"Vade":x.due_date,"Gün":(today.date()-x.due_date.date()).days} for x in overdue]),hide_index=True,use_container_width=True);st.bar_chart(pd.DataFrame([{"Vade":k,"Tutar":float(v)} for k,v in AccountAnalyticsService.aging(session).items()]).set_index("Vade"))
+        selected=st.selectbox("Detay / mutabakat carisi",accounts,format_func=lambda x:f"{x.name} · {x.account_type}")
+        with st.expander("Cari Detayı",expanded=True):
+            movements=session.query(CurrentAccountMovement).filter(CurrentAccountMovement.account_id==selected.id,CurrentAccountMovement.currency==currency,CurrentAccountMovement.transaction_date>=datetime.combine(start,datetime.min.time()),CurrentAccountMovement.transaction_date<=datetime.combine(end,datetime.max.time())).order_by(CurrentAccountMovement.transaction_date).all();behavior=AccountAnalyticsService.payment_behavior(session,selected.id);opens=session.query(OpenItem).filter_by(account_id=selected.id).all();d1,d2,d3,d4=st.columns(4);d1.metric("Cari Bakiye",sum((Decimal(str(x.debit))-Decimal(str(x.credit)) for x in movements),Decimal("0")));d2.metric("Açık Fatura",sum((Decimal(str(x.remaining_amount)) for x in opens),Decimal("0")));d3.metric("Ort. Ödeme Gecikmesi",behavior["average_payment_delay"]);d4.metric("İşlem Sayısı",len(movements));ledger=pd.DataFrame([{"Tarih":x.transaction_date,"İşlem Türü":x.transaction_type,"Belge No":x.document_number,"Açıklama":x.description,"Borç":x.debit,"Alacak":x.credit,"Para Birimi":x.currency,"Kur":x.exchange_rate,"Yerel Karşılık":x.base_amount,"Bakiye":x.running_balance,"Kaynak":f"{x.source_type} #{x.source_id}","Rezervasyon":x.booking_id,"Tur":x.tour_id,"Fatura":x.invoice_id,"Durum":x.status} for x in movements]);st.dataframe(ledger,hide_index=True,use_container_width=True);st.line_chart(ledger.set_index("Tarih")[["Bakiye"]].astype(float)) if not ledger.empty else None
+        with tabs[5]:
+            if st.button("Mutabakat Formu Oluştur"):
+                rec=AutomaticAccountReconciliationService.create(session,selected,start,end,currency);st.session_state.current_reconciliation_id=rec.id;st.rerun()
+            reconciliations=session.query(AccountReconciliation).filter_by(account_id=selected.id).order_by(AccountReconciliation.prepared_at.desc()).all()
+            for rec in reconciliations:
+                with st.expander(f"{rec.reference_number} · {rec.status} · {rec.closing_balance} {rec.currency}"):
+                    st.write(f"Açılış {rec.opening_balance} + Borç {rec.debit_total} - Alacak {rec.credit_total} = **{rec.closing_balance}**");lang=st.radio("Taslak dili",["TR","EN"],horizontal=True,key=f"lang_{rec.id}");st.text_area("Mutabakat Mesajı",AutomaticAccountReconciliationService.draft(selected,rec,lang),key=f"draft_{rec.id}");excel,pdf=AutomaticAccountReconciliationService.exports(session,rec);c1,c2=st.columns(2);c1.download_button("Excel İndir",excel,f"{rec.reference_number}.xlsx",key=f"rex_{rec.id}");c2.download_button("PDF İndir",pdf,f"{rec.reference_number}.pdf","application/pdf",key=f"rpdf_{rec.id}")
+                    response=st.selectbox("Karşı Taraf Yanıtı",["Cevap Bekleniyor","Mutabık","Mutabık Değil"],key=f"resp_{rec.id}");counter=st.number_input("Karşı taraf bakiyesi",value=0.0,key=f"counter_{rec.id}");explanation=st.text_area("Açıklama",key=f"expl_{rec.id}");attachment=st.file_uploader("Fark belgesi",type=["pdf","jpg","jpeg","png"],key=f"ratt_{rec.id}")
+                    a,b,c=st.columns(3)
+                    if a.button("Yanıtı Kaydet",key=f"save_resp_{rec.id}"):
+                        try:AutomaticAccountReconciliationService.record_response(session,rec,response,Decimal(str(counter)) if response=="Mutabık Değil" else None,explanation,attachment=(attachment.getvalue(),attachment.name,attachment.type) if attachment else None);st.rerun()
+                        except Exception as exc:st.error(str(exc))
+                    if b.button("Dönemi Kilitle",disabled=rec.lock_status=="Kilitli",key=f"lock_{rec.id}"):AutomaticAccountReconciliationService.lock(session,rec);st.rerun()
+                    if c.button("Dönemi Yeniden Aç",disabled=rec.lock_status!="Kilitli",key=f"reopen_{rec.id}"):AutomaticAccountReconciliationService.reopen(session,rec);st.rerun()
+        with tabs[6]:
+            differences=session.query(AccountReconciliationDifference).join(AccountReconciliation).filter(AccountReconciliation.account_id==selected.id).all();st.dataframe(pd.DataFrame([{"Tür":x.difference_type,"Önem":x.severity,"Tutar":x.amount,"Döviz":x.currency,"Açıklama":x.explanation,"Durum":x.status} for x in differences]),hide_index=True,use_container_width=True)
     finally: session.close()
 
 
