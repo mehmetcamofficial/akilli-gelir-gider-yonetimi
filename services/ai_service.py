@@ -19,7 +19,8 @@ from database.models import (
     AIRequest, AIUsageLog, AnomalyExplanation, AssistantQuery, BankTransaction,
     Booking, Cancellation, Collection, Document, DocumentConfidenceScore, DocumentReconciliation,
     ManagementCommentary, RestaurantReconciliation, Supplier, SupplierObjectionDraft,
-    SupplierPayment, Tour, Transaction,
+    SupplierPayment, Tour, Transaction, CurrentAccount, CurrentAccountMovement,
+    OpenItem, AccountReconciliation,
 )
 
 
@@ -252,6 +253,18 @@ class DocumentExtractionService:
 
 class SafeAnalyticsService:
     @staticmethod
+    def current_account_balances(session, start, end):
+        accounts=session.query(CurrentAccount).all();rows=[]
+        for account in accounts:
+            movements=session.query(CurrentAccountMovement).filter(CurrentAccountMovement.account_id==account.id,CurrentAccountMovement.transaction_date>=start,CurrentAccountMovement.transaction_date<=end).all();balance=sum((Decimal(x.debit or 0)-Decimal(x.credit or 0) for x in movements),Decimal(0));rows.append({"account":account.name,"type":account.account_type,"balance":str(balance)})
+        rows.sort(key=lambda x:abs(Decimal(x["balance"])),reverse=True);return {"accounts":rows[:20],"record_count":len(rows)}
+    @staticmethod
+    def current_account_over_90(session,start,end):
+        cutoff=datetime.utcnow()-timedelta(days=90);items=session.query(OpenItem).filter(OpenItem.remaining_amount>0,OpenItem.due_date<cutoff).all();return {"items":[{"account":session.get(CurrentAccount,x.account_id).name,"invoice":x.invoice_number,"amount":str(x.remaining_amount),"currency":x.currency} for x in items[:100]],"amount":str(sum((Decimal(x.remaining_amount) for x in items),Decimal(0))),"record_count":len(items)}
+    @staticmethod
+    def disputed_accounts(session,start,end):
+        rows=session.query(AccountReconciliation).filter(AccountReconciliation.status=="Mutabık Değil",AccountReconciliation.prepared_at>=start,AccountReconciliation.prepared_at<=end).all();return {"count":len(rows),"amount":str(sum((abs(Decimal(x.closing_balance)) for x in rows),Decimal(0))),"record_count":len(rows)}
+    @staticmethod
     def income_expense(session, start, end):
         rows = session.query(Transaction).filter(Transaction.transaction_date >= start, Transaction.transaction_date <= end, Transaction.is_deleted.is_(False)).all()
         income = sum((Decimal(row.grand_total or 0) for row in rows if row.transaction_type == "income"), Decimal(0)); expense = sum((Decimal(row.grand_total or 0) for row in rows if row.transaction_type == "expense"), Decimal(0))
@@ -321,6 +334,9 @@ class AccountingAssistantService:
         "document_confidence": ("belge güven kalite", SafeAnalyticsService.document_quality, "Belge Arşivi"),
         "missing_documents": ("eksik belgesiz kayıt", SafeAnalyticsService.missing_documents, "Belge Arşivi"),
         "data_quality_warnings": ("veri kalite uyarı", SafeAnalyticsService.data_quality, "Kontrol Merkezi"),
+        "current_account_balances": ("en yüksek açık bakiyeli müşteri cari bakiyesi ödeme davranışı restaurant", SafeAnalyticsService.current_account_balances, "Cari Hesap Mutabakatı"),
+        "current_account_over_90": ("90 günü geçen alacak", SafeAnalyticsService.current_account_over_90, "Cari Hesap Mutabakatı"),
+        "disputed_current_accounts": ("bu ay kaç cari mutabakat uyuşmadı mutabık değil", SafeAnalyticsService.disputed_accounts, "Cari Hesap Mutabakatı"),
     }
     FORBIDDEN = re.compile(r"\b(delete|drop|update|insert|öde|ödeme yap|sil|onayla|bakiyeyi değiştir|ignore previous|talimatları unut)\b", re.I)
 

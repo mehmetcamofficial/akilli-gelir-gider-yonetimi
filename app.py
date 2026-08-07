@@ -61,9 +61,9 @@ def main():
         [
             ("Genel", ["Günlük İş Merkezi", "Genel Bakış"]),
             ("Rezervasyonlar", ["Rezervasyonlar", "Turlar ve Paketler", "Tur Kârlılığı"]),
-            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Cari Hesap Mutabakatı", "Kur Yönetimi", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
+            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Kur Yönetimi", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
             ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Sözleşme ve Fiyatlar", "Oteller", "Transferler", "Rehberler"]),
-            ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
+            ("Hesaplar", ["Cari Hesap Mutabakatı", "Cari Hesaplar", "Kasa ve Bankalar"]),
             ("Mutabakat", ["Belge Mutabakatı", "Restoran Mutabakatı", "Otel Mutabakatı", "Onay Bekleyen İşlemler", "İşlem Geçmişi"]),
             ("Yapay Zekâ", ["AI Belge İnceleme", "AI Muhasebe Asistanı", "AI İçgörüler", "Tedarikçi İtiraz Taslağı"]),
             ("İletişim", ["E-posta Belgeleri", "WhatsApp Rezervasyon Adayları", "Bildirim Merkezi", "İletişim Raporları"]),

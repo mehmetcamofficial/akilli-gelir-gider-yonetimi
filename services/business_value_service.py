@@ -11,6 +11,7 @@ from database.models import (
     Tour, TourBudget, TourBudgetLine, Voucher, CurrencySettlement, ContractVersion,
     ContractPriceRule, RestaurantPriceRule, HotelPriceRule, TransferPriceRule,
     GuidePriceRule, ContractDocument, ContractPriceHistory, Notification, Document,
+    CurrentAccount, CurrentAccountMovement, OpenItem, AccountReconciliation,
 )
 from services.storage_service import store_document_bytes
 
@@ -36,6 +37,9 @@ class DailyWorkCenterService:
         "bank_unmatched": "Banka Hareketleri ve Mutabakat", "critical_reconciliation": "Belge Mutabakatı",
         "missing_documents": "Belge Arşivi", "failed_imports": "Excel Veri Aktarımı",
         "expiring_contracts": "Sözleşme ve Fiyatlar",
+        "account_receivables_due": "Cari Hesap Mutabakatı", "account_payables_due": "Cari Hesap Mutabakatı",
+        "overdue_customers": "Cari Hesap Mutabakatı", "overdue_suppliers": "Cari Hesap Mutabakatı",
+        "unmatched_payments": "Cari Hesap Mutabakatı", "pending_account_reconciliations": "Cari Hesap Mutabakatı",
     }
 
     @classmethod
@@ -54,12 +58,17 @@ class DailyWorkCenterService:
         missing = [row for row in upcoming if row.id not in booking_ids_with_voucher]
         failed = session.query(ImportBatch).filter(or_(ImportBatch.status.in_(["Hatalı", "Başarısız"]), ImportBatch.error_rows > 0)).all()
         expiring_contracts = session.query(SupplierContract).filter(SupplierContract.active.is_(True), SupplierContract.is_active.is_(True), or_(SupplierContract.valid_until.between(start, end + timedelta(days=60)), and_(SupplierContract.valid_until.is_(None), SupplierContract.valid_to.between(start, end + timedelta(days=60))))).all()
+        customer_account_ids=[x[0] for x in session.query(CurrentAccount.id).filter(CurrentAccount.customer_id.isnot(None)).all()];supplier_account_ids=[x[0] for x in session.query(CurrentAccount.id).filter(CurrentAccount.supplier_id.isnot(None)).all()]
+        due_items=session.query(OpenItem).filter(OpenItem.remaining_amount>0,OpenItem.due_date>=start,OpenItem.due_date<end).all();overdue_items=session.query(OpenItem).filter(OpenItem.remaining_amount>0,OpenItem.due_date<start).all()
         return {
             "collections_due": collections, "payments_due": payments,
             "overdue": overdue_collections + overdue_payments, "approvals": approvals,
             "bank_unmatched": unmatched, "critical_reconciliation": critical,
             "missing_documents": missing, "failed_imports": failed,
             "expiring_contracts": expiring_contracts,
+            "account_receivables_due":[x for x in due_items if x.account_id in customer_account_ids],"account_payables_due":[x for x in due_items if x.account_id in supplier_account_ids],
+            "overdue_customers":[x for x in overdue_items if x.account_id in customer_account_ids],"overdue_suppliers":[x for x in overdue_items if x.account_id in supplier_account_ids],
+            "unmatched_payments":session.query(CurrentAccountMovement).filter_by(status="Eşleşmeyen").all(),"pending_account_reconciliations":session.query(AccountReconciliation).filter(AccountReconciliation.status.in_(["Hazırlanıyor","Gönderime Hazır","Cevap Bekleniyor"])).all(),
         }
 
 

@@ -1141,6 +1141,55 @@ class CurrencySettlement(Base):
     __table_args__ = (Index("uq_currency_settlement_entity", "entity_type", "entity_id", unique=True),)
 
 
+class CurrentAccount(Base):
+    __tablename__ = "current_accounts"
+    id = Column(Integer, primary_key=True); account_type = Column(String(50), nullable=False, index=True); customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, unique=True, index=True); supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, unique=True, index=True); name = Column(String(255), nullable=False, index=True); base_currency = Column(String(10), default="TRY", nullable=False); active = Column(Boolean, default=True, nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False); updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CurrentAccountMovement(Base):
+    __tablename__ = "current_account_movements"
+    id = Column(Integer, primary_key=True); account_id = Column(Integer, ForeignKey("current_accounts.id"), nullable=False, index=True); transaction_date = Column(DateTime, nullable=False, index=True); transaction_type = Column(String(50), nullable=False, index=True); document_number = Column(String(255), index=True); description = Column(Text); debit = Column(Numeric(18, 2), default=Decimal("0"), nullable=False); credit = Column(Numeric(18, 2), default=Decimal("0"), nullable=False); currency = Column(String(10), nullable=False, index=True); exchange_rate = Column(Numeric(18, 6), default=Decimal("1"), nullable=False); base_amount = Column(Numeric(18, 2), nullable=False); running_balance = Column(Numeric(18, 2), default=Decimal("0"), nullable=False); source_type = Column(String(100), nullable=False); source_id = Column(Integer, nullable=False); source_hash = Column(String(128), nullable=False, unique=True, index=True); booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True, index=True); tour_id = Column(Integer, ForeignKey("tours.id"), nullable=True, index=True); invoice_id = Column(Integer, ForeignKey("transactions.id"), nullable=True, index=True); status = Column(String(50), default="Aktif", nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False); updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_current_movement_source", "source_type", "source_id", unique=True),)
+
+
+class OpenItem(Base):
+    __tablename__ = "open_items"
+    id = Column(Integer, primary_key=True); account_id = Column(Integer, ForeignKey("current_accounts.id"), nullable=False, index=True); movement_id = Column(Integer, ForeignKey("current_account_movements.id"), nullable=False, unique=True, index=True); invoice_number = Column(String(255), index=True); original_amount = Column(Numeric(18, 2), nullable=False); matched_amount = Column(Numeric(18, 2), default=Decimal("0"), nullable=False); remaining_amount = Column(Numeric(18, 2), nullable=False); currency = Column(String(10), nullable=False, index=True); due_date = Column(DateTime, index=True); status = Column(String(50), default="Açık", nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False); updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OpenItemMatch(Base):
+    __tablename__ = "open_item_matches"
+    id = Column(Integer, primary_key=True); open_item_id = Column(Integer, ForeignKey("open_items.id"), nullable=False, index=True); payment_movement_id = Column(Integer, ForeignKey("current_account_movements.id"), nullable=False, index=True); matched_amount = Column(Numeric(18, 2), nullable=False); match_rule = Column(String(100), nullable=False); confidence = Column(Numeric(5, 2), nullable=False); status = Column(String(50), default="Eşleşti", nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_open_item_payment", "open_item_id", "payment_movement_id", unique=True),)
+
+
+class AccountReconciliation(Base):
+    __tablename__ = "account_reconciliations"
+    id = Column(Integer, primary_key=True); account_id = Column(Integer, ForeignKey("current_accounts.id"), nullable=False, index=True); reference_number = Column(String(100), nullable=False, unique=True, index=True); period_start = Column(DateTime, nullable=False, index=True); period_end = Column(DateTime, nullable=False, index=True); currency = Column(String(10), nullable=False); opening_balance = Column(Numeric(18, 2), nullable=False); debit_total = Column(Numeric(18, 2), nullable=False); credit_total = Column(Numeric(18, 2), nullable=False); closing_balance = Column(Numeric(18, 2), nullable=False); status = Column(String(50), default="Hazırlanıyor", nullable=False, index=True); lock_status = Column(String(50), default="Açık", nullable=False, index=True); source_snapshot_hash = Column(String(128), nullable=False); notes = Column(Text); prepared_at = Column(DateTime, default=datetime.utcnow, nullable=False); finalized_at = Column(DateTime); reopened_at = Column(DateTime)
+
+
+class AccountReconciliationDifference(Base):
+    __tablename__ = "account_reconciliation_differences"
+    id = Column(Integer, primary_key=True); reconciliation_id = Column(Integer, ForeignKey("account_reconciliations.id"), nullable=False, index=True); difference_type = Column(String(100), nullable=False, index=True); severity = Column(String(50), nullable=False, index=True); amount = Column(Numeric(18, 2)); currency = Column(String(10)); source_type = Column(String(100)); source_id = Column(Integer); explanation = Column(Text, nullable=False); status = Column(String(50), default="Açık", nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AccountReconciliationResponse(Base):
+    __tablename__ = "account_reconciliation_responses"
+    id = Column(Integer, primary_key=True); reconciliation_id = Column(Integer, ForeignKey("account_reconciliations.id"), nullable=False, index=True); response_status = Column(String(50), nullable=False, index=True); counterparty_balance = Column(Numeric(18, 2)); difference_amount = Column(Numeric(18, 2)); explanation = Column(Text); document_id = Column(Integer, ForeignKey("documents.id"), nullable=True); follow_up_note = Column(Text); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AccountRiskScore(Base):
+    __tablename__ = "account_risk_scores"
+    id = Column(Integer, primary_key=True); account_id = Column(Integer, ForeignKey("current_accounts.id"), nullable=False, index=True); score_date = Column(DateTime, nullable=False, index=True); score = Column(Numeric(5, 2), nullable=False); risk_level = Column(String(20), nullable=False, index=True); components = Column(JSON, nullable=False); explanation = Column(Text, nullable=False); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_account_risk_date", "account_id", "score_date", unique=True),)
+
+
+class ExchangeDifferenceEntry(Base):
+    __tablename__ = "exchange_difference_entries"
+    id = Column(Integer, primary_key=True); account_id = Column(Integer, ForeignKey("current_accounts.id"), nullable=False, index=True); invoice_movement_id = Column(Integer, ForeignKey("current_account_movements.id"), nullable=False, index=True); payment_movement_id = Column(Integer, ForeignKey("current_account_movements.id"), nullable=False, index=True); original_amount = Column(Numeric(18, 2), nullable=False); currency = Column(String(10), nullable=False); invoice_rate = Column(Numeric(18, 6), nullable=False); payment_rate = Column(Numeric(18, 6), nullable=False); invoice_base_value = Column(Numeric(18, 2), nullable=False); payment_base_value = Column(Numeric(18, 2), nullable=False); difference_amount = Column(Numeric(18, 2), nullable=False); classification = Column(String(20), nullable=False); approval_status = Column(String(50), default="Onay Bekliyor", nullable=False, index=True); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_exchange_difference_movements", "invoice_movement_id", "payment_movement_id", unique=True),)
+
+
 class CashAccount(Base):
     __tablename__ = "cash_accounts"
     id = Column(Integer, primary_key=True)
