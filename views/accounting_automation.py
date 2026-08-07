@@ -18,6 +18,7 @@ from services.accounting_automation_service import (
     BankReconciliationService, DocumentMatchingService, FinancialValidationService,
     ReconciliationExportService,
 )
+from services.business_value_service import SupplierContractService
 from services.drive_import_service import ExcelFileReader, ValueNormalizationService
 from utils.ui import empty_state, page_header
 
@@ -73,10 +74,13 @@ def render_restaurant_reconciliation():
             actor = st.text_input("İnceleyen muhasebeci")
             submitted = st.form_submit_button("Analiz Et ve Onaya Gönder", type="primary")
         if submitted:
+            contract_result = SupplierContractService.price_for_category(session, supplier.id, booking.service_start_date or booking.booking_date, "Restoran", total_service)
+            if contract_result:
+                agreed = contract_result["price"].unit_price
             duplicate_invoice = bool(invoice_number and session.query(RestaurantReconciliation).filter(RestaurantReconciliation.invoice_number == invoice_number).first())
             duplicate_voucher = bool(session.query(RestaurantReconciliation).filter(RestaurantReconciliation.voucher_number == booking.voucher_number).first())
             document = {"supplier_name": supplier.name, "invoice_number": invoice_number, "voucher_number": booking.voucher_number, "total_service_count": total_service, "invoiced_unit_price": invoiced, "approved_additional_items": approved_extras, "unauthorized_extras": unauthorized, "tax_amount": tax, "invoice_total": invoice_total, "duplicate_invoice": duplicate_invoice, "duplicate_voucher": duplicate_voucher}
-            agency = {"supplier_name": supplier.name, "voucher_number": booking.voucher_number, "passenger_count": booking.passenger_count, "free_guide_count": free_guide, "free_driver_count": free_driver, "other_free_person_count": other_free, "agreed_unit_price": agreed, "currency": booking.currency}
+            agency = {"supplier_name": supplier.name, "voucher_number": booking.voucher_number, "passenger_count": booking.passenger_count, "free_guide_count": free_guide, "free_driver_count": free_driver, "other_free_person_count": other_free, "agreed_unit_price": agreed, "currency": contract_result["contract"].currency if contract_result else booking.currency, "contract_id": contract_result["contract"].id if contract_result else None, "contract_number": contract_result["contract"].contract_number if contract_result else None}
             result = FinancialValidationService.restaurant(document, agency)
             record = RestaurantReconciliation(supplier_id=supplier.id, voucher_number=booking.voucher_number, invoice_number=invoice_number or None, calculated_values={key: str(value) for key, value in result.items() if key != "differences"}, differences=result["differences"], expected_total=result["expected_total"], invoice_total=result["invoice_total"], potential_overpayment=result["potential_overpayment"], status="Onay Bekliyor")
             session.add(record); session.flush()
@@ -111,9 +115,11 @@ def render_hotel_reconciliation():
             actor = st.text_input("İnceleyen muhasebeci", key="hotel_actor")
             submitted = st.form_submit_button("Analiz Et ve Onaya Gönder", type="primary")
         if submitted:
+            supplier = session.query(Supplier).filter(Supplier.name == stay.hotel.name).first() if stay.hotel else None
+            contract_result = SupplierContractService.price_for_category(session, supplier.id, stay.checkin_date or stay.booking.service_start_date, "Otel", stay.room_count or 1) if supplier else None
             duplicate_invoice = bool(invoice_number and session.query(HotelReconciliation).filter(HotelReconciliation.invoice_number == invoice_number).first())
             document = {"invoice_number": invoice_number, "nights": invoice_nights, "room_count": invoice_rooms, "room_type": stay.room_type, "board_type": stay.board_type, "invoiced_room_rate": invoiced_rate, "approved_extras": approved_extras, "unapproved_extras": unapproved_extras, "tax_amount": tax, "invoice_total": invoice_total, "duplicate_invoice": duplicate_invoice}
-            booking = {"checkin_date": stay.checkin_date, "checkout_date": stay.checkout_date, "nights": stay.nights, "room_count": stay.room_count, "room_type": stay.room_type, "board_type": stay.board_type, "agreed_room_rate": stay.price_per_room, "adult_count": stay.adult_count, "child_count": stay.child_count}
+            booking = {"checkin_date": stay.checkin_date, "checkout_date": stay.checkout_date, "nights": stay.nights, "room_count": stay.room_count, "room_type": stay.room_type, "board_type": stay.board_type, "agreed_room_rate": contract_result["price"].unit_price if contract_result else stay.price_per_room, "adult_count": stay.adult_count, "child_count": stay.child_count, "contract_id": contract_result["contract"].id if contract_result else None, "contract_number": contract_result["contract"].contract_number if contract_result else None}
             result = FinancialValidationService.hotel(document, booking)
             record = HotelReconciliation(hotel_id=stay.hotel_id, booking_id=stay.booking_id, invoice_number=invoice_number or None, calculated_values={key: str(value) for key, value in result.items() if key != "differences"}, differences=result["differences"], expected_total=result["expected_total"], invoice_total=result["invoice_total"], status="Onay Bekliyor")
             session.add(record); session.flush()

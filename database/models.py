@@ -937,6 +937,126 @@ class SupplierPayment(Base):
     is_demo = Column(Boolean, default=False, nullable=False)
 
 
+class SupplierContract(Base):
+    __tablename__ = "supplier_contracts"
+    id = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False, index=True)
+    contract_number = Column(String(100), nullable=False, index=True)
+    supplier_type = Column(String(50), nullable=False, index=True)
+    valid_from = Column(DateTime, nullable=False, index=True)
+    valid_to = Column(DateTime, nullable=False, index=True)
+    currency = Column(String(10), nullable=False, default="TRY")
+    payment_terms_days = Column(Integer, default=0, nullable=False)
+    cancellation_rule = Column(Text)
+    free_person_rule = Column(JSON)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SupplierContractPrice(Base):
+    __tablename__ = "supplier_contract_prices"
+    id = Column(Integer, primary_key=True)
+    contract_id = Column(Integer, ForeignKey("supplier_contracts.id"), nullable=False, index=True)
+    service_code = Column(String(100), nullable=False, index=True)
+    service_name = Column(String(255), nullable=False)
+    expense_category = Column(String(100), nullable=False, index=True)
+    pricing_unit = Column(String(50), nullable=False)
+    unit_price = Column(Numeric(18, 2), nullable=False)
+    tax_rate = Column(Numeric(8, 4), default=Decimal("0"), nullable=False)
+    minimum_quantity = Column(Integer, default=0, nullable=False)
+    rules = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_contract_service_code", "contract_id", "service_code", unique=True),)
+
+
+class TourBudget(Base):
+    __tablename__ = "tour_budgets"
+    id = Column(Integer, primary_key=True)
+    tour_id = Column(Integer, ForeignKey("tours.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    passenger_target = Column(Integer, default=0, nullable=False)
+    currency = Column(String(10), default="TRY", nullable=False)
+    exchange_rate = Column(Numeric(18, 6), default=Decimal("1"), nullable=False)
+    status = Column(String(50), default="Aktif", nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class TourBudgetLine(Base):
+    __tablename__ = "tour_budget_lines"
+    id = Column(Integer, primary_key=True)
+    budget_id = Column(Integer, ForeignKey("tour_budgets.id"), nullable=False, index=True)
+    line_type = Column(String(20), nullable=False, index=True)
+    category = Column(String(100), nullable=False, index=True)
+    description = Column(String(500))
+    quantity = Column(Numeric(18, 4), default=Decimal("1"), nullable=False)
+    unit_amount = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    is_variable = Column(Boolean, default=False, nullable=False)
+    contract_price_id = Column(Integer, ForeignKey("supplier_contract_prices.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AccountReconciliationRun(Base):
+    __tablename__ = "account_reconciliation_runs"
+    id = Column(Integer, primary_key=True)
+    party_type = Column(String(20), nullable=False, index=True)
+    party_id = Column(Integer, nullable=False, index=True)
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    currency = Column(String(10), nullable=False)
+    opening_balance = Column(Numeric(18, 2), nullable=False)
+    invoice_total = Column(Numeric(18, 2), nullable=False)
+    payment_total = Column(Numeric(18, 2), nullable=False)
+    credit_total = Column(Numeric(18, 2), nullable=False)
+    closing_balance = Column(Numeric(18, 2), nullable=False)
+    status = Column(String(50), default="Hesaplandı", nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AccountReconciliationLine(Base):
+    __tablename__ = "account_reconciliation_lines"
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("account_reconciliation_runs.id"), nullable=False, index=True)
+    entry_date = Column(DateTime, nullable=False, index=True)
+    entry_type = Column(String(30), nullable=False)
+    reference = Column(String(255))
+    description = Column(Text)
+    debit = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    credit = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    running_balance = Column(Numeric(18, 2), nullable=False)
+    source_entity_type = Column(String(100))
+    source_entity_id = Column(Integer)
+
+
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    id = Column(Integer, primary_key=True)
+    rate_date = Column(DateTime, nullable=False, index=True)
+    currency = Column(String(10), nullable=False, index=True)
+    try_rate = Column(Numeric(18, 6), nullable=False)
+    source = Column(String(100), default="Manuel", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_exchange_rate_date_currency", "rate_date", "currency", unique=True),)
+
+
+class CurrencySettlement(Base):
+    __tablename__ = "currency_settlements"
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(100), nullable=False, index=True)
+    entity_id = Column(Integer, nullable=False, index=True)
+    direction = Column(String(20), nullable=False)
+    currency = Column(String(10), nullable=False, index=True)
+    foreign_amount = Column(Numeric(18, 2), nullable=False)
+    recognition_rate = Column(Numeric(18, 6), nullable=False)
+    settlement_rate = Column(Numeric(18, 6), nullable=False)
+    recognition_try = Column(Numeric(18, 2), nullable=False)
+    settlement_try = Column(Numeric(18, 2), nullable=False)
+    exchange_difference = Column(Numeric(18, 2), nullable=False)
+    settlement_date = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_currency_settlement_entity", "entity_type", "entity_id", unique=True),)
+
+
 class CashAccount(Base):
     __tablename__ = "cash_accounts"
     id = Column(Integer, primary_key=True)

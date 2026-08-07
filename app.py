@@ -39,6 +39,11 @@ from views.communications import (
     render_communication_reports, render_email_documents,
     render_notification_center, render_whatsapp_candidates,
 )
+from views.business_value import (
+    render_currency_management, render_current_account_reconciliation,
+    render_daily_work_center, render_supplier_contracts,
+    render_tour_budget_analysis,
+)
 
 
 def main():
@@ -54,15 +59,15 @@ def main():
 
     selected_page = sidebar_menu(
         [
-            ("Genel", ["Genel Bakış"]),
+            ("Genel", ["Günlük İş Merkezi", "Genel Bakış"]),
             ("Rezervasyonlar", ["Rezervasyonlar", "Turlar ve Paketler", "Tur Kârlılığı"]),
-            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
-            ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Oteller", "Transferler", "Rehberler"]),
+            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Cari Hesap Mutabakatı", "Kur Yönetimi", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
+            ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Tedarikçi Sözleşmeleri", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
             ("Mutabakat", ["Belge Mutabakatı", "Restoran Mutabakatı", "Otel Mutabakatı", "Onay Bekleyen İşlemler", "İşlem Geçmişi"]),
             ("Yapay Zekâ", ["AI Belge İnceleme", "AI Muhasebe Asistanı", "AI İçgörüler", "Tedarikçi İtiraz Taslağı"]),
             ("İletişim", ["E-posta Belgeleri", "WhatsApp Rezervasyon Adayları", "Bildirim Merkezi", "İletişim Raporları"]),
-            ("Rapor ve Analiz", ["Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Kontrol Merkezi", "Ayarlar"]),
+            ("Rapor ve Analiz", ["Tur Bütçesi", "Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Kontrol Merkezi", "Ayarlar"]),
         ]
     )
 
@@ -78,7 +83,9 @@ def main():
     finally:
         notification_session.close()
 
-    if selected_page == "Genel Bakış":
+    if selected_page == "Günlük İş Merkezi":
+        render_daily_work_center()
+    elif selected_page == "Genel Bakış":
         render_dashboard()
     elif selected_page == "Rezervasyonlar":
         render_bookings()
@@ -92,10 +99,16 @@ def main():
         render_collections()
     elif selected_page == "Tedarikçi Ödemeleri":
         render_supplier_payments()
+    elif selected_page == "Cari Hesap Mutabakatı":
+        render_current_account_reconciliation()
+    elif selected_page == "Kur Yönetimi":
+        render_currency_management()
     elif selected_page == "Müşteriler ve Yolcular":
         render_customers()
     elif selected_page == "Tedarikçiler":
         render_suppliers()
+    elif selected_page == "Tedarikçi Sözleşmeleri":
+        render_supplier_contracts()
     elif selected_page == "Oteller":
         render_hotels()
     elif selected_page == "Transferler":
@@ -108,6 +121,8 @@ def main():
         render_cash_and_banks()
     elif selected_page == "Tur Kârlılığı":
         render_tour_profitability()
+    elif selected_page == "Tur Bütçesi":
+        render_tour_budget_analysis()
     elif selected_page == "Raporlar":
         render_reports()
     elif selected_page == "Yönetim Analitiği":
