@@ -8,12 +8,16 @@ from database.db import SessionLocal
 from database.models import (
     AccountReconciliationLine, AccountReconciliationRun, Booking, Customer,
     CurrencySettlement, ExchangeRate, Supplier, SupplierContract,
-    SupplierContractPrice, Tour, TourBudget, TourBudgetLine,
+    SupplierContractPrice, Tour, TourBudget, TourBudgetLine, ContractVersion,
+    ContractPriceRule, RestaurantPriceRule, HotelPriceRule, TransferPriceRule,
+    GuidePriceRule, ContractPriceHistory, ContractDocument,
 )
 from services.business_value_service import (
     BusinessAuditService, CurrencyManagementService, CurrentAccountReconciliationService,
     DailyWorkCenterService, SupplierContractService, TourBudgetAnalysisService,
+    ContractPriceService, ContractManagementService,
 )
+from services.storage_service import load_document_bytes
 from utils.ui import empty_state, page_header
 
 
@@ -32,6 +36,7 @@ def render_daily_work_center():
             "overdue": "Vadesi Geçenler", "approvals": "Bekleyen Onaylar",
             "bank_unmatched": "Eşleşmemiş Banka Hareketleri", "critical_reconciliation": "Kritik Mutabakat Farkları",
             "missing_documents": "Eksik Tur Belgeleri", "failed_imports": "Hatalı Aktarımlar",
+            "expiring_contracts": "Süresi Yaklaşan Sözleşmeler",
         }
         cols = st.columns(4)
         for index, key in enumerate(labels):
@@ -102,6 +107,98 @@ def render_supplier_contracts():
                 else: st.warning("Bu tarih ve hizmet için geçerli sözleşme fiyatı bulunamadı.")
     finally:
         session.close()
+
+
+def render_contract_prices():
+    page_header("Sözleşme ve Fiyatlar", "Tedarikçi, otel, restoran, transfer ve rehberlerle yapılan fiyat anlaşmalarını yönetin ve faturaları geçerli sözleşmeye göre kontrol edin.")
+    session = SessionLocal()
+    try:
+        ContractManagementService.create_expiry_notifications(session)
+        now = datetime.utcnow(); contracts = session.query(SupplierContract).all(); rules = session.query(ContractPriceRule).filter(ContractPriceRule.active.is_(True)).all()
+        for contract in contracts: contract.status = ContractPriceService.contract_status(contract, now)
+        session.commit()
+        active = [x for x in contracts if x.status == "Aktif"]; expiring = [x for x in contracts if x.status == "Süresi Yaklaşıyor" and (x.valid_until or x.valid_to) <= now + timedelta(days=30)]; expired = [x for x in contracts if x.status == "Süresi Doldu"]
+        supplier_ids_with_price = {session.get(SupplierContract, session.get(ContractVersion, rule.version_id).contract_id).supplier_id for rule in rules}; missing = session.query(Supplier).filter(~Supplier.id.in_(supplier_ids_with_price)).count() if supplier_ids_with_price else session.query(Supplier).count()
+        recent_increases = session.query(ContractPriceHistory).filter(ContractPriceHistory.created_at >= now - timedelta(days=30), ContractPriceHistory.change_percentage > 0).count()
+        cards = st.columns(5); cards[0].metric("Aktif Sözleşme", len(active)); cards[1].metric("30 Gün İçinde Bitecek", len(expiring)); cards[2].metric("Süresi Dolmuş", len(expired)); cards[3].metric("Fiyatı Eksik Tedarikçi", missing); cards[4].metric("Son 30 Gün Fiyat Artışı", recent_increases)
+        tabs = st.tabs(["Aktif Sözleşmeler", "Fiyat Listeleri", "Süresi Yaklaşanlar", "Fiyat Geçmişi", "Maliyet Simülasyonu", "Excel Aktarımı"])
+        suppliers = session.query(Supplier).order_by(Supplier.name).all(); tours = session.query(Tour).order_by(Tour.name).all()
+        with tabs[0]:
+            if not suppliers: empty_state("Tedarikçi bulunamadı", "Önce bir tedarikçi oluşturun.")
+            else:
+                with st.expander("Yeni Sözleşme", expanded=not contracts):
+                    with st.form("complete_contract_form"):
+                        supplier = st.selectbox("1. Tedarikçi", suppliers, format_func=lambda x: x.name); contract_type = st.selectbox("2. Sözleşme Türü", ContractPriceService.CONTRACT_TYPES)
+                        c1,c2,c3=st.columns(3); start=c1.date_input("3. Başlangıç",date.today()); end=c2.date_input("Bitiş",date.today()+timedelta(days=365)); currency=c3.selectbox("4. Para Birimi",CurrencyManagementService.CURRENCIES)
+                        title=st.text_input("Sözleşme Başlığı"); number=st.text_input("Sözleşme Numarası"); pricing_model=st.selectbox("5. Fiyat Modeli",["Kişi Başı","Oda / Gece","Kişi / Gece","Sabit Grup","Tek Yön","Gidiş-Dönüş","Yarım Gün","Tam Gün"])
+                        service_name=st.text_input("Hizmet / Menü / Rota Adı"); tour=st.selectbox("Tur (isteğe bağlı)",[None]+tours,format_func=lambda x:"Tüm turlar" if x is None else x.name); destination=st.text_input("Destinasyon (isteğe bağlı)")
+                        base=st.number_input("Sabit / Temel Fiyat",min_value=0.0); adult=child=infant=0.0; subtype={}
+                        if contract_type=="Restoran":
+                            r1,r2,r3=st.columns(3); subtype["meal_type"]=r1.text_input("Öğün Türü"); subtype["menu_name"]=r2.text_input("Menü Adı"); adult=r3.number_input("Yetişkin Fiyatı",min_value=0.0); child=st.number_input("Çocuk Fiyatı",min_value=0.0); infant=st.number_input("Bebek Fiyatı",min_value=0.0); subtype["free_guide"]=st.checkbox("Rehber ücretsiz"); subtype["free_driver"]=st.checkbox("Şoför ücretsiz"); subtype["free_person_ratio"]=st.number_input("Kaç ödeyen kişiye 1 ücretsiz?",min_value=0,value=0); subtype["guide_price"]=0; subtype["driver_price"]=0; subtype["additional_service_price"]=0; subtype["minimum_passenger_count"]=0; subtype["group_price"]=base
+                        elif contract_type=="Otel":
+                            subtype["room_type"]=st.text_input("Oda Türü",value="double"); subtype["board_type"]=st.selectbox("Pansiyon",["RO","BB","HB","FB","AI"]); subtype["single_room"]=st.number_input("Tek Kişilik Oda",min_value=0.0); subtype["double_room"]=st.number_input("Çift Kişilik Oda",min_value=0.0); subtype["triple_room"]=st.number_input("Üç Kişilik Oda",min_value=0.0); subtype["family_room"]=0; subtype["city_tax"]=st.number_input("Şehir Vergisi",min_value=0.0)
+                        elif contract_type=="Transfer":
+                            subtype["origin"]=st.text_input("Başlangıç"); subtype["destination"]=st.text_input("Varış"); subtype["vehicle_type"]=st.selectbox("Araç",["Sedan","Minivan","Minibus","Midibus","Bus","VIP","Other"]); subtype["passenger_capacity"]=st.number_input("Kapasite",min_value=1,value=4); subtype["one_way_price"]=st.number_input("Tek Yön",min_value=0.0); subtype["round_trip_price"]=st.number_input("Gidiş-Dönüş",min_value=0.0); subtype["waiting_hour_price"]=0; subtype["extra_kilometer_price"]=0; subtype["airport_fee"]=0; subtype["night_surcharge"]=0; subtype["driver_accommodation"]=0
+                        elif contract_type=="Rehber":
+                            subtype["language"]=st.text_input("Dil"); subtype["service_type"]=st.selectbox("Hizmet Süresi",["Yarım Gün","Tam Gün"]); subtype["half_day_price"]=st.number_input("Yarım Gün",min_value=0.0); subtype["full_day_price"]=st.number_input("Tam Gün",min_value=0.0); subtype["hourly_overtime"]=st.number_input("Fazla Saat",min_value=0.0); subtype["overnight_allowance"]=0; subtype["meal_allowance"]=0; subtype["transportation_allowance"]=0; subtype["museum_fee"]=0
+                        tax_included=st.checkbox("Vergi fiyata dahil"); tax_rate=st.number_input("Vergi %",min_value=0.0); document=st.file_uploader("7. Sözleşme Belgesi",type=["pdf","jpg","jpeg","png","xlsx","xls"]); preview=st.checkbox("8. Bilgileri kontrol ettim")
+                        save=st.form_submit_button("9. Kaydet",type="primary",disabled=not preview)
+                    if save:
+                        try:
+                            if end<start or not title or not service_name: raise ValueError("Başlık, hizmet ve geçerli tarih aralığı zorunludur.")
+                            start_dt=datetime.combine(start,datetime.min.time()); end_dt=datetime.combine(end,datetime.max.time()); contract,version=ContractManagementService.create_contract(session,supplier.id,contract_type,title,start_dt,end_dt,currency,contract_number=number,tax_included=tax_included,tax_rate=tax_rate)
+                            ContractManagementService.create_price_rule(session,contract,version,contract_type,service_name,start_dt,end_dt,pricing_model,subtype_values=subtype,tour_id=tour.id if tour else None,destination=destination or None,currency=currency,base_price=base,adult_price=adult,child_price=child,infant_price=infant,tax_rate=tax_rate,tax_included=tax_included)
+                            if document: ContractManagementService.store_document(session,contract,version,document.getvalue(),document.name,document.type)
+                            session.commit(); st.success("Sözleşme, fiyat kuralı ve belge geçmişi kaydedildi."); st.rerun()
+                        except Exception as exc: session.rollback(); st.error(str(exc))
+            for contract in active:
+                supplier=session.get(Supplier,contract.supplier_id)
+                with st.expander(f"{supplier.name} · {contract.title or contract.contract_number} · {contract.contract_type or contract.supplier_type}"):
+                    st.write(f"{contract.valid_from:%d.%m.%Y} – {(contract.valid_until or contract.valid_to):%d.%m.%Y} · {contract.currency} · {contract.status}")
+                    docs=session.query(ContractDocument).filter_by(contract_id=contract.id).order_by(ContractDocument.uploaded_at.desc()).all()
+                    for link in docs:
+                        doc=session.get(__import__('database.models',fromlist=['Document']).Document,link.document_id); st.download_button(f"Belgeyi İndir · {doc.original_filename}",load_document_bytes(doc),doc.original_filename,key=f"contract_doc_{link.id}")
+        with tabs[1]:
+            selected_type=st.selectbox("Hizmet Türü",["Tümü"]+list(ContractPriceService.CONTRACT_TYPES)); shown=rules if selected_type=="Tümü" else [x for x in rules if x.service_type==selected_type]
+            st.dataframe(pd.DataFrame([{"Hizmet":x.service_name,"Tür":x.service_type,"Başlangıç":x.valid_from,"Bitiş":x.valid_until,"Model":x.pricing_model,"Temel":x.base_price,"Yetişkin":x.adult_price,"Çocuk":x.child_price,"Döviz":x.currency} for x in shown]),hide_index=True,use_container_width=True)
+            if shown:
+                rule=st.selectbox("Fiyatı güncelle",shown,format_func=lambda x:f"{x.service_name} · {x.base_price or x.adult_price} {x.currency}"); c1,c2=st.columns(2); new_price=c1.number_input("Yeni fiyat",min_value=0.0); effective=c2.date_input("Yeni fiyat başlangıcı",min_value=rule.valid_from.date(),max_value=rule.valid_until.date())
+                if st.button("Yeni Fiyat Versiyonu Oluştur"):
+                    try: ContractManagementService.version_price(session,rule,Decimal(str(new_price)),datetime.combine(effective,datetime.min.time())); session.commit(); st.success("Eski dönem kapatıldı, yeni fiyat sürümü oluşturuldu."); st.rerun()
+                    except Exception as exc: session.rollback(); st.error(str(exc))
+            with st.expander("Tedarikçi Fiyat Karşılaştırması"):
+                btype=st.selectbox("Karşılaştırma Türü",ContractPriceService.CONTRACT_TYPES,key="bench_type"); bname=st.text_input("Aynı Hizmet Adı"); bdate=st.date_input("Hizmet Tarihi",key="bench_date")
+                if st.button("Karşılaştır"): st.dataframe(pd.DataFrame(ContractManagementService.benchmark(session,btype,bname,bdate)),hide_index=True,use_container_width=True)
+        with tabs[2]:
+            upcoming=sorted([x for x in contracts if x.status in {"Süresi Yaklaşıyor","Süresi Doldu"}],key=lambda x:x.valid_until or x.valid_to)
+            st.dataframe(pd.DataFrame([{"Tedarikçi":session.get(Supplier,x.supplier_id).name,"Sözleşme":x.title,"Bitiş":x.valid_until or x.valid_to,"Durum":x.status} for x in upcoming]),hide_index=True,use_container_width=True)
+        with tabs[3]:
+            history=session.query(ContractPriceHistory).order_by(ContractPriceHistory.effective_date).all(); st.dataframe(pd.DataFrame([{"Tarih":x.effective_date,"Hizmet":session.get(ContractPriceRule,x.price_rule_id).service_name,"Eski Fiyat":x.old_price,"Yeni Fiyat":x.new_price,"Değişim %":x.change_percentage,"Döviz":x.currency} for x in history]),hide_index=True,use_container_width=True)
+            if history:
+                chart=pd.DataFrame([{"Tarih":x.effective_date,"Fiyat":float(x.new_price)} for x in history]).set_index("Tarih"); st.line_chart(chart)
+        with tabs[4]:
+            if tours:
+                tour=st.selectbox("Tur",tours,format_func=lambda x:x.name,key="sim_tour"); sim_date=st.date_input("Hizmet Tarihi",date.today()+timedelta(days=30),key="sim_date"); c1,c2,c3=st.columns(3); adults=c1.number_input("Yetişkin",min_value=0,value=20); children=c2.number_input("Çocuk",min_value=0,value=0); rooms=c3.number_input("Oda",min_value=0,value=0); vehicle=st.selectbox("Araç",["Sedan","Minivan","Minibus","Midibus","Bus","VIP","Other"]); language=st.text_input("Rehber Dili",value="Türkçe"); revenue=st.number_input("Beklenen Satış Geliri",min_value=0.0)
+                if st.button("Maliyeti Simüle Et",type="primary"):
+                    result=ContractManagementService.simulate(session,tour.id,sim_date,adults,children,rooms,vehicle,language,revenue); st.dataframe(pd.DataFrame(result["lines"]),hide_index=True,use_container_width=True); cols=st.columns(5); cols[0].metric("Tedarikçi Maliyeti",result["total_supplier_cost"]); cols[1].metric("Kişi Başı",result["cost_per_passenger"]); cols[2].metric("Brüt Kâr",result["estimated_gross_profit"]); cols[3].metric("Kâr Marjı %",result["expected_profit_margin"]); cols[4].metric("Başa Baş Yolcu",result["break_even_passenger_count"] or "—")
+        with tabs[5]:
+            upload=st.file_uploader("Excel veya CSV",type=["xlsx","xls","csv"],key="contract_import")
+            if upload:
+                frame=pd.read_csv(upload) if upload.name.lower().endswith(".csv") else pd.read_excel(upload); st.dataframe(frame.head(100),hide_index=True,use_container_width=True); confirm=st.checkbox("Önizlemeyi kontrol ettim; içe aktar")
+                if st.button("Onaylı Aktarımı Başlat",disabled=not confirm):
+                    required={"supplier","contract type","service","valid from","valid until","currency"}; normalized={str(c).strip().lower():c for c in frame.columns}; missing_columns=required-set(normalized)
+                    if missing_columns: st.error("Eksik sütunlar: "+", ".join(sorted(missing_columns)))
+                    else:
+                        imported=0
+                        try:
+                            for _,row in frame.iterrows():
+                                supplier=session.query(Supplier).filter(Supplier.name==str(row[normalized["supplier"]]).strip()).first()
+                                if not supplier: continue
+                                start=pd.to_datetime(row[normalized["valid from"]]).to_pydatetime(); end=pd.to_datetime(row[normalized["valid until"]]).to_pydatetime(); ctype=str(row[normalized["contract type"]]).strip(); service=str(row[normalized["service"]]).strip(); contract,version=ContractManagementService.create_contract(session,supplier.id,ctype,f"{service} İçe Aktarım",start,end,str(row[normalized["currency"]]).strip())
+                                ContractManagementService.create_price_rule(session,contract,version,ctype,service,start,end,"Kişi Başı",currency=contract.currency,adult_price=row[normalized.get("adult price",normalized.get("room price",normalized.get("vehicle price",normalized.get("guide price"))))] if any(k in normalized for k in ["adult price","room price","vehicle price","guide price"]) else 0,child_price=row[normalized["child price"]] if "child price" in normalized else 0,tax_rate=row[normalized["tax"]] if "tax" in normalized else 0); imported+=1
+                            BusinessAuditService.log(session,"CONTRACT_IMPORT_COMPLETED","supplier_contract",details={"imported":imported}); session.commit(); st.success(f"{imported} sözleşme satırı aktarıldı."); st.rerun()
+                        except Exception as exc: session.rollback(); st.error(f"Aktarım geri alındı: {exc}")
+    finally: session.close()
 
 
 def render_tour_budget_analysis():

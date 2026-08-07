@@ -53,7 +53,7 @@ def test_document_metadata_survives_engine_reboot(tmp_path):
 
 def test_schema_has_phase3_application_tables_and_drive_columns(tmp_path):
     engine, session = _session(tmp_path)
-    assert len(Base.metadata.tables) == 82
+    assert len(Base.metadata.tables) == 90
     columns = {column["name"] for column in inspect(engine).get_columns("documents")}
     assert {"storage_provider", "drive_file_id", "drive_web_view_link"} <= columns
     session.close(); engine.dispose()

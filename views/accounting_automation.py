@@ -18,7 +18,7 @@ from services.accounting_automation_service import (
     BankReconciliationService, DocumentMatchingService, FinancialValidationService,
     ReconciliationExportService,
 )
-from services.business_value_service import SupplierContractService
+from services.business_value_service import SupplierContractService, ContractPriceService, BusinessAuditService
 from services.drive_import_service import ExcelFileReader, ValueNormalizationService
 from utils.ui import empty_state, page_header
 
@@ -74,18 +74,23 @@ def render_restaurant_reconciliation():
             actor = st.text_input("İnceleyen muhasebeci")
             submitted = st.form_submit_button("Analiz Et ve Onaya Gönder", type="primary")
         if submitted:
-            contract_result = SupplierContractService.price_for_category(session, supplier.id, booking.service_start_date or booking.booking_date, "Restoran", total_service)
-            if contract_result:
-                agreed = contract_result["price"].unit_price
+            price_match = ContractPriceService.find_valid_price(session, supplier.id, "Restoran", booking.service_start_date or booking.booking_date, tour_id=booking.tour_id)
+            contract_result = SupplierContractService.price_for_category(session, supplier.id, booking.service_start_date or booking.booking_date, "Restoran", total_service) if not price_match else None
+            if price_match:
+                agreed = price_match["rule"].adult_price or price_match["rule"].base_price
+                free_guide = 1 if price_match["detail"] and price_match["detail"].free_guide else free_guide
+                free_driver = 1 if price_match["detail"] and price_match["detail"].free_driver else free_driver
+            elif contract_result: agreed = contract_result["price"].unit_price
             duplicate_invoice = bool(invoice_number and session.query(RestaurantReconciliation).filter(RestaurantReconciliation.invoice_number == invoice_number).first())
             duplicate_voucher = bool(session.query(RestaurantReconciliation).filter(RestaurantReconciliation.voucher_number == booking.voucher_number).first())
             document = {"supplier_name": supplier.name, "invoice_number": invoice_number, "voucher_number": booking.voucher_number, "total_service_count": total_service, "invoiced_unit_price": invoiced, "approved_additional_items": approved_extras, "unauthorized_extras": unauthorized, "tax_amount": tax, "invoice_total": invoice_total, "duplicate_invoice": duplicate_invoice, "duplicate_voucher": duplicate_voucher}
-            agency = {"supplier_name": supplier.name, "voucher_number": booking.voucher_number, "passenger_count": booking.passenger_count, "free_guide_count": free_guide, "free_driver_count": free_driver, "other_free_person_count": other_free, "agreed_unit_price": agreed, "currency": contract_result["contract"].currency if contract_result else booking.currency, "contract_id": contract_result["contract"].id if contract_result else None, "contract_number": contract_result["contract"].contract_number if contract_result else None}
+            agency = {"supplier_name": supplier.name, "voucher_number": booking.voucher_number, "passenger_count": booking.passenger_count, "free_guide_count": free_guide, "free_driver_count": free_driver, "other_free_person_count": other_free, "agreed_unit_price": agreed, "currency": price_match["rule"].currency if price_match else contract_result["contract"].currency if contract_result else booking.currency, "contract_id": price_match["contract"].id if price_match else contract_result["contract"].id if contract_result else None, "contract_number": ContractPriceService.explain_price_source(price_match) if price_match else contract_result["contract"].contract_number if contract_result else None}
             result = FinancialValidationService.restaurant(document, agency)
             record = RestaurantReconciliation(supplier_id=supplier.id, voucher_number=booking.voucher_number, invoice_number=invoice_number or None, calculated_values={key: str(value) for key, value in result.items() if key != "differences"}, differences=result["differences"], expected_total=result["expected_total"], invoice_total=result["invoice_total"], potential_overpayment=result["potential_overpayment"], status="Onay Bekliyor")
             session.add(record); session.flush()
             ApprovalWorkflowService.create(session, "Restoran mutabakatı", "Onay sonrası faturaya veya tedarikçi ödemesine kaydet", source_entity_type="restaurant_reconciliation", source_entity_id=record.id, before=agency, after=document, differences=result["differences"], financial_effect=result["difference"], actor=actor, commit=False)
             AuditLogService.log(session, "restaurant_reconciliation_analyzed", entity_type="restaurant_reconciliation", entity_id=record.id, new_values=result, actor_name=actor)
+            if price_match: BusinessAuditService.log(session,"CONTRACT_PRICE_USED","contract_price_rule",price_match["rule"].id,{"reconciliation_id":record.id})
             session.commit(); st.session_state.restaurant_result = result
         if st.session_state.get("restaurant_result"):
             _result(st.session_state.restaurant_result)
@@ -116,15 +121,18 @@ def render_hotel_reconciliation():
             submitted = st.form_submit_button("Analiz Et ve Onaya Gönder", type="primary")
         if submitted:
             supplier = session.query(Supplier).filter(Supplier.name == stay.hotel.name).first() if stay.hotel else None
-            contract_result = SupplierContractService.price_for_category(session, supplier.id, stay.checkin_date or stay.booking.service_start_date, "Otel", stay.room_count or 1) if supplier else None
+            price_match = ContractPriceService.find_valid_price(session,supplier.id,"Otel",stay.checkin_date or stay.booking.service_start_date,tour_id=stay.booking.tour_id,selectors={"room_type":stay.room_type,"board_type":stay.board_type}) if supplier else None
+            contract_result = SupplierContractService.price_for_category(session, supplier.id, stay.checkin_date or stay.booking.service_start_date, "Otel", stay.room_count or 1) if supplier and not price_match else None
             duplicate_invoice = bool(invoice_number and session.query(HotelReconciliation).filter(HotelReconciliation.invoice_number == invoice_number).first())
             document = {"invoice_number": invoice_number, "nights": invoice_nights, "room_count": invoice_rooms, "room_type": stay.room_type, "board_type": stay.board_type, "invoiced_room_rate": invoiced_rate, "approved_extras": approved_extras, "unapproved_extras": unapproved_extras, "tax_amount": tax, "invoice_total": invoice_total, "duplicate_invoice": duplicate_invoice}
-            booking = {"checkin_date": stay.checkin_date, "checkout_date": stay.checkout_date, "nights": stay.nights, "room_count": stay.room_count, "room_type": stay.room_type, "board_type": stay.board_type, "agreed_room_rate": contract_result["price"].unit_price if contract_result else stay.price_per_room, "adult_count": stay.adult_count, "child_count": stay.child_count, "contract_id": contract_result["contract"].id if contract_result else None, "contract_number": contract_result["contract"].contract_number if contract_result else None}
+            room_field=f"{str(stay.room_type or 'double').lower()}_room"; matched_room_rate=getattr(price_match["detail"],room_field,None) if price_match and price_match["detail"] else None
+            booking = {"checkin_date": stay.checkin_date, "checkout_date": stay.checkout_date, "nights": stay.nights, "room_count": stay.room_count, "room_type": stay.room_type, "board_type": stay.board_type, "agreed_room_rate": matched_room_rate or price_match["rule"].base_price if price_match else contract_result["price"].unit_price if contract_result else stay.price_per_room, "adult_count": stay.adult_count, "child_count": stay.child_count, "contract_id": price_match["contract"].id if price_match else contract_result["contract"].id if contract_result else None, "contract_number": ContractPriceService.explain_price_source(price_match) if price_match else contract_result["contract"].contract_number if contract_result else None}
             result = FinancialValidationService.hotel(document, booking)
             record = HotelReconciliation(hotel_id=stay.hotel_id, booking_id=stay.booking_id, invoice_number=invoice_number or None, calculated_values={key: str(value) for key, value in result.items() if key != "differences"}, differences=result["differences"], expected_total=result["expected_total"], invoice_total=result["invoice_total"], status="Onay Bekliyor")
             session.add(record); session.flush()
             ApprovalWorkflowService.create(session, "Otel mutabakatı", "Onay sonrası faturaya veya tedarikçi ödemesine kaydet", source_entity_type="hotel_reconciliation", source_entity_id=record.id, before=booking, after=document, differences=result["differences"], financial_effect=result["difference"], actor=actor, commit=False)
             AuditLogService.log(session, "hotel_reconciliation_analyzed", entity_type="hotel_reconciliation", entity_id=record.id, new_values=result, actor_name=actor)
+            if price_match: BusinessAuditService.log(session,"CONTRACT_PRICE_USED","contract_price_rule",price_match["rule"].id,{"reconciliation_id":record.id})
             session.commit(); st.session_state.hotel_result = result
         if st.session_state.get("hotel_result"): _result(st.session_state.hotel_result); st.success("Analiz onay kuyruğuna gönderildi.")
     finally: session.close()
