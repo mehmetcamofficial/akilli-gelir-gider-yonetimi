@@ -1,5 +1,6 @@
 import streamlit as st
-from database.db import init_db
+from database.db import SessionLocal, init_db
+from database.models import Notification
 from utils.ui import inject_styles, sidebar_brand, sidebar_menu
 
 from views.dashboard import render_dashboard
@@ -25,6 +26,19 @@ from views.settings import render_settings
 from views.drive_import import render_drive_import
 from views.document_reconciliation import render_document_reconciliation
 from views.management_analytics import render_management_analytics
+from views.accounting_automation import (
+    render_approval_queue, render_audit_history, render_bank_reconciliation,
+    render_hotel_reconciliation, render_restaurant_reconciliation,
+    render_supplier_payment_reconciliation,
+)
+from views.ai_features import (
+    render_ai_accounting_assistant, render_ai_document_review,
+    render_ai_insights, render_supplier_objection,
+)
+from views.communications import (
+    render_communication_reports, render_email_documents,
+    render_notification_center, render_whatsapp_candidates,
+)
 
 
 def main():
@@ -42,10 +56,13 @@ def main():
         [
             ("Genel", ["Genel Bakış"]),
             ("Rezervasyonlar", ["Rezervasyonlar", "Turlar ve Paketler", "Tur Kârlılığı"]),
-            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri"]),
+            ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
             ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
-            ("Rapor ve Analiz", ["Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Belge Mutabakatı", "Kontrol Merkezi", "Ayarlar"]),
+            ("Mutabakat", ["Belge Mutabakatı", "Restoran Mutabakatı", "Otel Mutabakatı", "Onay Bekleyen İşlemler", "İşlem Geçmişi"]),
+            ("Yapay Zekâ", ["AI Belge İnceleme", "AI Muhasebe Asistanı", "AI İçgörüler", "Tedarikçi İtiraz Taslağı"]),
+            ("İletişim", ["E-posta Belgeleri", "WhatsApp Rezervasyon Adayları", "Bildirim Merkezi", "İletişim Raporları"]),
+            ("Rapor ve Analiz", ["Yönetim Analitiği", "Raporlar", "Excel Veri Aktarımı", "Belge Arşivi", "Kontrol Merkezi", "Ayarlar"]),
         ]
     )
 
@@ -54,6 +71,12 @@ def main():
         st.write('Kısa menü ile gezinip işlemlerinizi yapabilirsiniz.')
 
     init_db()
+    notification_session = SessionLocal()
+    try:
+        unread_notifications = notification_session.query(Notification).filter(Notification.is_read.is_(False), Notification.dismissed_at.is_(None)).count()
+        st.sidebar.metric("🔔 Okunmamış Bildirim", unread_notifications)
+    finally:
+        notification_session.close()
 
     if selected_page == "Genel Bakış":
         render_dashboard()
@@ -95,6 +118,34 @@ def main():
         render_documents()
     elif selected_page == "Belge Mutabakatı":
         render_document_reconciliation()
+    elif selected_page == "Restoran Mutabakatı":
+        render_restaurant_reconciliation()
+    elif selected_page == "Otel Mutabakatı":
+        render_hotel_reconciliation()
+    elif selected_page == "Tedarikçi Ödeme Mutabakatı":
+        render_supplier_payment_reconciliation()
+    elif selected_page == "Banka Hareketleri ve Mutabakat":
+        render_bank_reconciliation()
+    elif selected_page == "Onay Bekleyen İşlemler":
+        render_approval_queue()
+    elif selected_page == "İşlem Geçmişi":
+        render_audit_history()
+    elif selected_page == "AI Belge İnceleme":
+        render_ai_document_review()
+    elif selected_page == "AI Muhasebe Asistanı":
+        render_ai_accounting_assistant()
+    elif selected_page == "AI İçgörüler":
+        render_ai_insights()
+    elif selected_page == "Tedarikçi İtiraz Taslağı":
+        render_supplier_objection()
+    elif selected_page == "E-posta Belgeleri":
+        render_email_documents()
+    elif selected_page == "WhatsApp Rezervasyon Adayları":
+        render_whatsapp_candidates()
+    elif selected_page == "Bildirim Merkezi":
+        render_notification_center()
+    elif selected_page == "İletişim Raporları":
+        render_communication_reports()
     elif selected_page == "Kontrol Merkezi":
         render_control_center()
     elif selected_page == "Ayarlar":

@@ -3,9 +3,9 @@ from io import BytesIO
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 ALLOWED_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
@@ -63,3 +63,26 @@ def download_drive_file(file_id, file_mime_type, service):
 
     buffer.seek(0)
     return buffer
+
+
+def upload_drive_file(folder_id, filename, mime_type, content, service):
+    media = MediaIoBaseUpload(BytesIO(content), mimetype=mime_type or "application/octet-stream", resumable=True)
+    created = service.files().create(
+        body={"name": filename, "parents": [folder_id]},
+        media_body=media,
+        fields="id,name,mimeType,size,modifiedTime,webViewLink,webContentLink",
+        supportsAllDrives=True,
+    ).execute()
+    return created
+
+
+def delete_drive_file(file_id, service):
+    service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+
+
+def get_drive_file_metadata(file_id, service):
+    return service.files().get(
+        fileId=file_id,
+        fields="id,name,mimeType,size,modifiedTime,webViewLink,webContentLink,trashed",
+        supportsAllDrives=True,
+    ).execute()

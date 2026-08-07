@@ -12,12 +12,21 @@ def test_postgresql_url_uses_psycopg_without_exposing_credentials(monkeypatch):
     monkeypatch.setattr(db.st, "secrets", {"DATABASE_URL": secret})
     normalized = db._database_url()
     assert normalized.startswith("postgresql+psycopg://")
-    assert normalized.endswith("/postgres")
+    assert "/postgres" in normalized
+    assert "sslmode=require" in normalized
 
 
 def test_local_fallback_is_sqlite(monkeypatch):
     monkeypatch.setattr(db.st, "secrets", {})
     assert db._database_url() == "sqlite:///database/app.db"
+
+
+def test_supabase_pooler_validation():
+    valid = db.validate_database_config("postgresql+psycopg://user:secret@aws-0-eu.pooler.supabase.com:6543/postgres?sslmode=require")
+    invalid = db.validate_database_config("postgresql+psycopg://user:secret@aws-0-eu.pooler.supabase.com:9999/postgres?sslmode=disable")
+    assert valid["valid"] and valid["pooler"] == "Supabase pooler"
+    assert not invalid["valid"]
+    assert len(invalid["issues"]) == 2
 
 
 def test_customer_booking_and_transaction_survive_new_engine(tmp_path):

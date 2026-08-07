@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 from database.db import engine
 from database.models import Booking, Customer, Tour, Staff, SalesChannel
+from utils.ui import empty_state
 
 
 def render_bookings():

@@ -5,8 +5,11 @@ import streamlit as st
 
 from services.google_drive_service import (
     create_drive_service,
+    delete_drive_file as _delete_drive_file,
     download_drive_file as _download_drive_file,
+    get_drive_file_metadata as _get_drive_file_metadata,
     list_drive_excel_files,
+    upload_drive_file as _upload_drive_file,
 )
 
 
@@ -174,3 +177,21 @@ def list_drive_files(service=None, folder_id=None):
 def download_drive_file(file_id, mime_type, service=None):
     service = service or get_drive_service()
     return _download_drive_file(file_id, mime_type, service)
+
+
+def upload_drive_file(filename, mime_type, content, service=None, folder_id=None):
+    service = service or get_drive_service()
+    folder_id = normalize_folder_id(folder_id) if folder_id else get_drive_folder_id()
+    if not folder_id:
+        raise ValueError("Drive klasör ID girilmedi.")
+    return _upload_drive_file(folder_id, filename, mime_type, content, service)
+
+
+def delete_drive_file(file_id, service=None):
+    service = service or get_drive_service()
+    return _delete_drive_file(file_id, service)
+
+
+def get_drive_file_metadata(file_id, service=None):
+    service = service or get_drive_service()
+    return _get_drive_file_metadata(file_id, service)

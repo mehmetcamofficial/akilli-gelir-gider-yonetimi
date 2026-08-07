@@ -9,6 +9,7 @@ import streamlit as st
 from sqlalchemy.orm import sessionmaker
 
 from database.db import engine
+from database.models import AuditLog, ImportMappingTemplate
 from services.drive_import_service import (
     DATASET_TYPES,
     REQUIRED_FIELDS,
@@ -202,6 +203,29 @@ def _render_import_workflow(file_bytes, filename, ui_prefix, save_label=None):
     st.session_state[mapping_state_key] = mapping
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
+    with st.expander("Eşleştirme şablonları"):
+        template_session = Session()
+        try:
+            templates = template_session.query(ImportMappingTemplate).filter(ImportMappingTemplate.dataset_type == dataset_type).order_by(ImportMappingTemplate.name).all()
+            if templates:
+                selected_template = st.selectbox("Kayıtlı şablon", templates, format_func=lambda item: item.name, key=f"{ui_prefix}_template")
+                if st.button("Şablonu Uygula", key=f"{ui_prefix}_apply_template"):
+                    for source, target in (selected_template.mapping_configuration or {}).items():
+                        if source in mapping and target in options:
+                            st.session_state[f"{ui_prefix}_map_{source}"] = target
+                    st.rerun()
+            template_name = st.text_input("Yeni şablon adı", key=f"{ui_prefix}_template_name")
+            owner_key = st.text_input("Banka / tedarikçi / dosya türü", key=f"{ui_prefix}_template_owner")
+            if st.button("Eşleştirmeyi Şablon Olarak Kaydet", disabled=not template_name.strip(), key=f"{ui_prefix}_save_template"):
+                template = ImportMappingTemplate(name=template_name.strip(), source_type="Google Drive" if ui_prefix.startswith("drive") else "Yerel", owner_key=owner_key.strip() or None, dataset_type=dataset_type, mapping_configuration=mapping)
+                template_session.add(template); template_session.flush()
+                template_session.add(AuditLog(event_type="mapping_template_saved", entity_type="import_mapping_template", entity_id=template.id, action="manual_mapping_change", new_values={"name": template.name, "dataset_type": dataset_type, "mapping": mapping}, source="smart_import", status="Tamamlandı"))
+                template_session.commit(); st.success("Eşleştirme şablonu kaydedildi.")
+        except Exception as exc:
+            template_session.rollback(); st.warning(f"Şablon işlemi tamamlanamadı: {exc}")
+        finally:
+            template_session.close()
+
     selected_targets = [value for value in mapping.values() if value != "Kullanma"]
     duplicates = sorted({value for value in selected_targets if selected_targets.count(value) > 1})
     missing = REQUIRED_FIELDS.get(dataset_type, set()) - set(selected_targets)
@@ -253,7 +277,7 @@ def _render_import_workflow(file_bytes, filename, ui_prefix, save_label=None):
     if st.button("Doğrulanmış Verileri İçe Aktar", key=f"{ui_prefix}_import", type="primary", disabled=disabled):
         session = Session()
         try:
-            batch_id, result = ImportExecutionService.execute(session, filename, file_bytes, dataset_type, validated, include_duplicates)
+            batch_id, result = ImportExecutionService.execute(session, filename, file_bytes, dataset_type, validated, include_duplicates, source_type="Google Drive" if ui_prefix.startswith("drive") else "Yerel", worksheet=selected_sheet, mapping=mapping)
             st.session_state[f"{ui_prefix}_result"] = {"batch_id": batch_id, **result}
         except Exception as exc:
             st.error(f"Aktarım geri alındı; veritabanında kısmi kayıt bırakılmadı: {exc}")
