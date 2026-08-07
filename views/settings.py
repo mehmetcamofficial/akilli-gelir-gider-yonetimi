@@ -1,5 +1,7 @@
 import streamlit as st
+from database.db import SessionLocal
 from database.migrations import delete_demo_data, restore_demo_data
+from database.models import AuditLog
 from services.google_drive_config import (
     clear_drive_config,
     get_drive_folder_id,
@@ -10,6 +12,7 @@ from services.google_drive_config import (
     save_drive_config,
 )
 from views.drive_import import render_drive_file_list
+from services.cache_service import reset_demo_runtime_state
 
 
 def render_settings():
@@ -158,19 +161,20 @@ def render_settings():
                 type="primary",
             ):
                 deleted = delete_demo_data()
-                st.cache_data.clear()
-                st.cache_resource.clear()
-                for key in list(st.session_state):
-                    if key.startswith(("demo_", "tour_", "booking_", "dashboard_")):
-                        del st.session_state[key]
+                audit_session = SessionLocal()
+                try:
+                    audit_session.add(AuditLog(event_type="demo_data_deleted", entity_type="demo_data", action="demo-data deletion", old_values=deleted, source="settings", status="Tamamlandı"))
+                    audit_session.commit()
+                finally:
+                    audit_session.close()
+                reset_demo_runtime_state()
                 st.session_state.demo_delete_result = deleted
                 st.rerun()
 
         with demo_col2:
             if st.button("Demo Verilerini Yükle"):
                 restore_demo_data()
-                st.cache_data.clear()
-                st.cache_resource.clear()
+                reset_demo_runtime_state()
                 st.success("Demo verileri yüklendi.")
 
         st.warning("Bu işlem geri alınamaz; gerçek kullanıcı kayıtları etkilenmez.")

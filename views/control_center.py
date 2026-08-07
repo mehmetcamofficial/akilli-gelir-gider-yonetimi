@@ -12,6 +12,7 @@ from database.models import (
     Transfer, Voucher,
 )
 from utils.ui import page_header, render_metric_cards, section_header
+from services.google_drive_config import has_valid_drive_config
 
 
 VALID_CURRENCIES = {"TRY", "EUR", "USD", "GBP"}
@@ -140,6 +141,24 @@ def render_control_center():
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
+        health = database_health()
+        drive_documents = session.query(Document).filter(Document.drive_file_id.isnot(None)).count()
+        local_documents = session.query(Document).filter(Document.drive_file_id.is_(None)).count()
+        duplicate_hashes = session.query(Document.file_hash).filter(Document.file_hash.isnot(None)).group_by(Document.file_hash).having(func.count(Document.id) > 1).count()
+        section_header("Sistem Sağlığı")
+        render_metric_cards(
+            [
+                {"title": "PostgreSQL", "value": "Bağlı" if health["ok"] and health["provider"].startswith("PostgreSQL") else ("Yerel" if health["ok"] else "Hata"), "note": health["provider"]},
+                {"title": "Veritabanı Şeması", "value": f"{health['table_count'] or 0}/{health['expected_table_count']}", "note": f"Migration: {health['migration_revision'] or 'yok'}"},
+                {"title": "Pooler / SSL", "value": health["pooler"], "note": f"SSL: {health['ssl']}"},
+                {"title": "Google Drive", "value": "Hazır" if has_valid_drive_config() else "Eksik", "note": f"Drive'da {drive_documents} belge"},
+                {"title": "Yerel Belge", "value": local_documents, "note": "Production'da sıfır olmalı"},
+                {"title": "Mükerrer SHA-256", "value": duplicate_hashes, "note": "Aynı içerikli belge grubu"},
+                {"title": "Son Başarılı Sorgu", "value": health["last_successful_query"].strftime("%H:%M:%S") if health["last_successful_query"] else "—", "note": "UTC"},
+                {"title": "Genel Durum", "value": "Sağlıklı" if health["ok"] and health["table_count"] == health["expected_table_count"] else "Kontrol Gerekli", "note": health["message"]},
+            ],
+            columns=4,
+        )
         financial, operations, quality, overdue_bookings, overdue_payments = _build_controls(session)
         all_rows = financial + operations + quality
         critical = len(overdue_bookings) + len(overdue_payments) + sum(1 for row in operations if row["Kontrol"] in {"Kapasite aşımı", "Maliyeti geliri aşan tur"})
@@ -194,7 +213,6 @@ def render_control_center():
         render_metric_cards([{"title": label, "value": count, "note": "Toplam kayıt"} for label, count in counts], columns=4)
 
         with st.expander("Teknik Sistem Bilgileri", expanded=False):
-            health = database_health()
             if health["ok"]:
                 st.success(health["message"])
             else:
@@ -202,6 +220,10 @@ def render_control_center():
             info = {
                 "Database provider": health["provider"],
                 "Table count": health["table_count"] if health["table_count"] is not None else "—",
+                "Expected table count": health["expected_table_count"],
+                "Migration revision": health["migration_revision"] or "—",
+                "Pooler": health["pooler"],
+                "SSL": health["ssl"],
                 "Last successful query": health["last_successful_query"].strftime("%d.%m.%Y %H:%M:%S UTC") if health["last_successful_query"] else "Henüz yok",
                 "Application version": "1.0.0",
                 "Last health check": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),

@@ -5,7 +5,7 @@ from database.db import engine
 import pandas as pd
 from datetime import date, timedelta
 from decimal import Decimal
-from database.models import Booking, Tour, Collection, SupplierPayment, Supplier
+from database.models import Booking, Tour, Collection, Notification, SupplierPayment, Supplier
 import plotly.express as px
 from utils.ui import page_header, render_metric_cards, section_header, format_currency, empty_state
 
@@ -41,6 +41,23 @@ def render_dashboard():
     cancelled_bookings = session.query(Booking).filter(Booking.booking_status.ilike('%iptal%')).count()
     tour_capacity = session.query(func.coalesce(func.sum(Tour.capacity), 0)).scalar() or 0
     occupancy_rate = (float(total_passengers) / float(tour_capacity) * 100) if tour_capacity else 0.0
+    today_collections = session.query(Booking).filter(func.date(Booking.final_payment_date) == today, Booking.remaining_amount > 0).count()
+    week_collections = session.query(Booking).filter(Booking.final_payment_date > today, Booking.final_payment_date <= today + timedelta(days=7), Booking.remaining_amount > 0).count()
+    overdue_collections = session.query(Booking).filter(Booking.final_payment_date < today, Booking.remaining_amount > 0).count()
+    today_payments = session.query(SupplierPayment).filter(func.date(SupplierPayment.due_date) == today, SupplierPayment.remaining_amount > 0).count()
+    week_payments = session.query(SupplierPayment).filter(SupplierPayment.due_date > today, SupplierPayment.due_date <= today + timedelta(days=7), SupplierPayment.remaining_amount > 0).count()
+    overdue_payments = session.query(SupplierPayment).filter(SupplierPayment.due_date < today, SupplierPayment.remaining_amount > 0).count()
+    pending_reminders = session.query(Notification).filter(Notification.status.in_(["Planlandı", "Gönderime Hazır", "Ertelendi"])).count()
+
+    render_metric_cards([
+        {"title":"Bugün Vadesi Gelen Tahsilat","value":today_collections,"note":"Müşteri tahsilatları"},
+        {"title":"Önümüzdeki 7 Gün Tahsilat","value":week_collections,"note":"Yaklaşan tahsilatlar"},
+        {"title":"Vadesi Geçmiş Tahsilat","value":overdue_collections,"note":"Takip gerektiriyor"},
+        {"title":"Bugün Vadesi Gelen Ödeme","value":today_payments,"note":"Tedarikçi ödemeleri"},
+        {"title":"Önümüzdeki 7 Gün Ödeme","value":week_payments,"note":"Yaklaşan ödemeler"},
+        {"title":"Vadesi Geçmiş Ödeme","value":overdue_payments,"note":"Kontrol gerektiriyor"},
+        {"title":"Bekleyen Hatırlatma","value":pending_reminders,"note":"Bildirim merkezinde"},
+    ], columns=4)
 
     render_metric_cards(
         [

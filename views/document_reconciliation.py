@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import json
 import mimetypes
@@ -22,6 +21,7 @@ from services.document_reconciliation_service import (
 )
 from services.drive_import_service import ColumnMappingService, ExcelFileReader, ValueNormalizationService
 from services.google_drive_config import download_drive_file, initialize_drive_state
+from services.storage_service import store_document_bytes
 from utils.ui import page_header
 
 
@@ -226,10 +226,9 @@ def _styled_comparison(frame):
 def _save_document(session, info):
     if not info or not info.get("bytes"): return None, None
     digest = hashlib.sha256(info["bytes"]).hexdigest()
-    document = session.query(Document).filter(Document.file_hash == digest).first()
-    if not document:
-        document = Document(original_filename=info["name"], file_type=_mime(info["name"], info.get("type")), file_hash=digest, file_size=len(info["bytes"]))
-        session.add(document); session.flush()
+    document, _ = store_document_bytes(
+        info["bytes"], info["name"], _mime(info["name"], info.get("type")), session, commit=False
+    )
     return document, digest
 
 
@@ -239,7 +238,7 @@ def _persist(session, left_info, right_info, left, right, result, action, destin
     reconciliation = DocumentReconciliation(document_id=left_document.id if left_document else None, document_hash=left_hash or hashlib.sha256(json.dumps(left, default=str).encode()).hexdigest(), extracted_json=json.dumps({"incoming": left, "agency": right}, ensure_ascii=False, default=str), matched_entity_type=right_info.get("entity_type") if right_info else result.get("matched_entity_type"), matched_entity_id=right_info.get("entity_id") if right_info else result.get("matched_entity_id"), status=result["status"], severity=result["severity"], differences_json=json.dumps(result["field_differences"], ensure_ascii=False, default=str), expected_total=result.get("expected_total"), document_total=result.get("document_total"), difference_amount=result.get("difference_amount"), difference_percentage=result.get("difference_percentage"), recommended_action=result.get("recommended_action"), user_action=action, user_note=note, reviewed_at=datetime.utcnow())
     session.add(reconciliation); session.flush()
     for side, info, document, digest, extracted in (("incoming", left_info, left_document, left_hash, left), ("agency", right_info, right_document, right_hash, right)):
-        session.add(ReconciliationDocument(reconciliation_id=reconciliation.id, side=side, document_id=document.id if document else None, source_type=(info or {}).get("source", "manual"), source_entity_type=(info or {}).get("entity_type"), source_entity_id=(info or {}).get("entity_id"), filename=(info or {}).get("name"), file_hash=digest, content_base64=base64.b64encode(info["bytes"]).decode() if info and info.get("bytes") else None, extracted_json=json.dumps(extracted, ensure_ascii=False, default=str)))
+        session.add(ReconciliationDocument(reconciliation_id=reconciliation.id, side=side, document_id=document.id if document else None, source_type=(info or {}).get("source", "manual"), source_entity_type=(info or {}).get("entity_type"), source_entity_id=(info or {}).get("entity_id"), filename=(info or {}).get("name"), file_hash=digest, content_base64=None, extracted_json=json.dumps(extracted, ensure_ascii=False, default=str)))
     comparison = _comparison_frame(left, right, result)
     for row in comparison.to_dict("records"):
         session.add(ReconciliationField(reconciliation_id=reconciliation.id, field_name=row["Kontrol Alanı"], incoming_value=str(row["Karşıdan Gelen Belge"] or ""), agency_value=str(row["Acenta Kaydı"] or ""), status=row["Durum"], explanation=row["Açıklama"]))

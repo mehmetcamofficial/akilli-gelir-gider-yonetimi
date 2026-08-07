@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 from database.db import database_url
 from database.models import Base
@@ -21,8 +21,12 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    configuration = config.get_section(config.config_ini_section) or {}
-    connectable = engine_from_config(configuration, prefix="sqlalchemy.", poolclass=pool.NullPool)
+    connectable = create_engine(
+        database_url,
+        poolclass=pool.NullPool,
+        pool_pre_ping=True,
+        connect_args={"prepare_threshold": None} if database_url.startswith("postgresql") else {},
+    )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
         with context.begin_transaction():

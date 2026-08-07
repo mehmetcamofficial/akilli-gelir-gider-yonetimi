@@ -1,11 +1,10 @@
 import json
 import re
-import urllib.error
-import urllib.request
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func
+from services.ai_service import AIModelConfigService, AIUnavailableError, OpenRouterClient
 
 from database.models import (
     Booking, Collection, Document, Supplier, SupplierPayment, Tour, Transaction,
@@ -54,14 +53,11 @@ class SensitiveDataMaskingService:
 
 
 class OpenRouterDocumentExtractor:
-    API_URL = "https://openrouter.ai/api/v1/chat/completions"
-    MODEL = "openai/gpt-4o-mini"
-
     def __init__(self, api_key, transport=None):
         if not api_key:
             raise AIExtractionError("OpenRouter API anahtarı bulunamadı. Manuel giriş kullanabilirsiniz.")
-        self.api_key = api_key
-        self.transport = transport or self._post
+        config = AIModelConfigService.config(); config["api_key"] = api_key
+        self.client = OpenRouterClient(transport=transport, config=config)
 
     @staticmethod
     def schema():
@@ -102,33 +98,12 @@ class OpenRouterDocumentExtractor:
             media = {"type": "text", "text": "Maskelenmiş belge metni:\n" + SensitiveDataMaskingService.mask_text(local_text)[:50000]}
         else:
             raise AIExtractionError("Görsel belge kişisel veriler yerel olarak maskelenemediği için AI'ya gönderilmedi. Manuel giriş kullanabilirsiniz.")
-        payload = {
-            "model": self.MODEL,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, media]}],
-            "response_format": {"type": "json_schema", "json_schema": {"name": "tourism_document_extraction", "strict": True, "schema": self.schema()}},
-            "temperature": 0,
-        }
-        response = self.transport(payload)
         try:
-            content = response["choices"][0]["message"]["content"]
-            result = json.loads(content) if isinstance(content, str) else content
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            result, _ = self.client.request("tourism_document_extraction", [{"role": "user", "content": [{"type": "text", "text": prompt}, media]}], self.schema(), summary={"filename_hash": __import__("hashlib").sha256(filename.encode()).hexdigest()})
+        except (AIUnavailableError, ValueError) as exc:
             raise AIExtractionError("AI geçerli yapılandırılmış JSON döndürmedi. Manuel giriş kullanabilirsiniz.") from exc
         self._validate(result)
         return result
-
-    def _post(self, payload):
-        request = urllib.request.Request(
-            self.API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=90) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise AIExtractionError("AI servisine ulaşılamadı. Manuel giriş ile devam edebilirsiniz.") from exc
 
     @staticmethod
     def _validate(result):

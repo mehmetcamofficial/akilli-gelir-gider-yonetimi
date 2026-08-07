@@ -2,7 +2,6 @@ import hashlib
 import json
 import re
 import unicodedata
-import urllib.request
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
@@ -14,11 +13,13 @@ from sqlalchemy import func
 
 from database.models import (
     AuditLog, BankTransaction, Booking, Collection, Customer, ImportBatch,
-    Supplier, SupplierPayment, Tour, Transaction, Voucher,
+    ImportBatchRow, ImportMappingTemplate, Supplier, SupplierPayment, Tour,
+    Transaction, Voucher,
 )
+from services.ai_service import AIModelConfigService, OpenRouterClient
 
 
-DATASET_TYPES = ["Gelir-Gider", "Rezervasyon", "Tahsilat", "Tedarikçi Ödemesi", "Fatura", "Tur", "Müşteri", "Tedarikçi", "Restoran Mutabakatı", "Voucher", "Banka Hareketleri", "Bilinmeyen"]
+DATASET_TYPES = ["Gelir-Gider", "Rezervasyon", "Tahsilat", "Tedarikçi Ödemesi", "Fatura", "Tur", "Müşteri", "Tedarikçi", "Restoran Mutabakatı", "Otel Mutabakatı", "Voucher", "Banka Hareketleri", "Bilinmeyen"]
 TARGET_FIELDS = {
     "transaction_date": "Tarih", "transaction_type": "İşlem Türü", "description": "Açıklama",
     "document_number": "Belge No", "invoice_number": "Fatura No", "booking_number": "Rezervasyon No",
@@ -67,6 +68,7 @@ REQUIRED_FIELDS = {
     "Fatura": {"invoice_number", "grand_total"}, "Tur": {"tour_code", "tour_name"},
     "Müşteri": {"customer_name"}, "Tedarikçi": {"supplier_name"},
     "Restoran Mutabakatı": {"voucher_number", "grand_total"},
+    "Otel Mutabakatı": {"booking_number", "grand_total"},
     "Voucher": {"voucher_number", "booking_number"}, "Banka Hareketleri": {"transaction_date"},
 }
 AMOUNT_FIELDS = {"unit_price", "subtotal", "tax_total", "grand_total", "collected_amount", "paid_amount", "remaining_amount", "income", "expense", "debit", "credit", "exchange_rate"}
@@ -204,19 +206,13 @@ class AIColumnLabelingService:
                 "additionalProperties": False,
             },
         }
-        body = json.dumps({
-            "model": "openai/gpt-4o-mini",
-            "messages": [{"role": "user", "content": "Yalnızca belirsiz Excel kolonlarını muhasebe alanlarıyla öneri olarak eşleştir. Finansal karar verme. Veri: " + json.dumps(samples, ensure_ascii=False)}],
-            "response_format": {"type": "json_schema", "json_schema": schema},
-            "temperature": 0,
-        }).encode("utf-8")
-        request = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions", data=body,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST",
+        config = AIModelConfigService.config(); config["api_key"] = api_key
+        payload, _ = OpenRouterClient(config=config).request(
+            "column_suggestions",
+            [{"role": "user", "content": "Yalnızca belirsiz Excel kolonlarını muhasebe alanlarıyla öneri olarak eşleştir. Finansal karar verme. Veri: " + json.dumps(samples, ensure_ascii=False)}],
+            schema["schema"], timeout=30, summary={"ambiguous_column_count": len(columns)},
         )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return json.loads(payload["choices"][0]["message"]["content"])["suggestions"]
+        return payload["suggestions"]
 
 
 class DatasetTypeClassifier:
@@ -328,21 +324,28 @@ class RowValidationService:
 
 class ImportAuditService:
     @staticmethod
-    def log(session, event, batch_id, details): session.add(AuditLog(event_type=event, entity_type="import_batch", entity_id=batch_id, details_json=json.dumps(details, ensure_ascii=False, default=str)))
+    def log(session, event, batch_id, details): session.add(AuditLog(event_type=event, entity_type="import_batch", entity_id=batch_id, batch_id=batch_id, action=event, new_values=details, source="smart_import", status="Tamamlandı", details_json=json.dumps(details, ensure_ascii=False, default=str)))
 
 
 class ImportExecutionService:
     @classmethod
-    def execute(cls, session, filename, file_bytes, dataset_type, validated_rows, include_duplicates=False):
-        batch = ImportBatch(filename=filename, file_hash=hashlib.sha256(file_bytes).hexdigest(), dataset_type=dataset_type, total_rows=len(validated_rows)); session.add(batch); session.flush()
+    def execute(cls, session, filename, file_bytes, dataset_type, validated_rows, include_duplicates=False, source_type="local", worksheet=None, mapping=None):
+        valid_count = sum(item["validation"]["status"] in {"Hazır", "Uyarılı"} for item in validated_rows)
+        invalid_count = sum(item["validation"]["status"] == "Hatalı" for item in validated_rows)
+        batch = ImportBatch(filename=filename, file_hash=hashlib.sha256(file_bytes).hexdigest(), dataset_type=dataset_type, total_rows=len(validated_rows), source_type=source_type, worksheet=worksheet, mapping_configuration=mapping or {}, valid_rows=valid_count, invalid_rows=invalid_count, status="Aktarılıyor"); session.add(batch); session.flush()
+        ImportAuditService.log(session, "file_import_started", batch.id, {"filename": filename, "dataset_type": dataset_type, "worksheet": worksheet})
+        ImportAuditService.log(session, "automatic_and_manual_mapping_confirmed", batch.id, {"mapping": mapping or {}})
         result = {"imported": 0, "skipped": 0, "errors": 0, "duplicates": 0, "updated": 0, "customers": 0, "suppliers": 0, "bookings": 0, "transactions": 0}
         try:
-            for item in validated_rows:
+            for row_number, item in enumerate(validated_rows, 1):
                 row, status = item["row"], item["validation"]["status"]
+                batch_row = ImportBatchRow(batch_id=batch.id, row_number=row_number, raw_values={key: str(value) if value is not None else None for key, value in row.items()}, normalized_values={key: str(value) if value is not None else None for key, value in row.items()}, validation_messages=item["validation"].get("messages", []), status=status)
+                session.add(batch_row)
                 if status == "Hatalı": result["errors"] += 1; result["skipped"] += 1; continue
                 if status == "Mükerrer" and not include_duplicates: result["duplicates"] += 1; result["skipped"] += 1; continue
-                cls._insert(session, batch.id, dataset_type, row, result); result["imported"] += 1
-            batch.imported_rows=result["imported"]; batch.skipped_rows=result["skipped"]; batch.error_rows=result["errors"]; batch.duplicate_rows=result["duplicates"]; batch.result_json=json.dumps(result)
+                target_type, target_id = cls._insert(session, batch.id, dataset_type, row, result)
+                session.flush(); batch_row.target_entity_type = target_type; batch_row.target_entity_id = target_id; result["imported"] += 1
+            batch.imported_rows=result["imported"]; batch.skipped_rows=result["skipped"]; batch.error_rows=result["errors"]; batch.duplicate_rows=result["duplicates"]; batch.result_json=json.dumps(result); batch.completed_at=datetime.utcnow(); batch.status="Tamamlandı"
             ImportAuditService.log(session, "import_completed", batch.id, result); session.commit()
             from services.analytics_service import clear_analytics_cache
             clear_analytics_cache()
@@ -354,12 +357,12 @@ class ImportExecutionService:
     def _insert(session, batch_id, kind, row, result):
         if kind in {"Gelir-Gider", "Fatura"}:
             total = row.get("grand_total") or (row.get("income") or Decimal(0)) - (row.get("expense") or Decimal(0))
-            session.add(Transaction(transaction_type=row.get("transaction_type") or ("income" if total >= 0 else "expense"), invoice_type="sale" if total >= 0 else "purchase", transaction_date=row.get("transaction_date") or datetime.utcnow(), due_date=row.get("due_date"), invoice_number=row.get("invoice_number") or row.get("document_number"), description=row.get("description") or row.get("notes"), party_name=row.get("customer_name") or row.get("supplier_name"), currency=row.get("currency") or "TRY", exchange_rate=row.get("exchange_rate") or 1, subtotal=row.get("subtotal") or total - (row.get("tax_total") or 0), tax_total=row.get("tax_total") or 0, grand_total=total, paid_amount=row.get("paid_amount") or row.get("collected_amount") or 0, remaining_amount=row.get("remaining_amount") if row.get("remaining_amount") is not None else total - (row.get("paid_amount") or 0), payment_status=row.get("payment_status") or "Ödenmedi")); result["transactions"] += 1
+            record=Transaction(transaction_type=row.get("transaction_type") or ("income" if total >= 0 else "expense"), invoice_type="sale" if total >= 0 else "purchase", transaction_date=row.get("transaction_date") or datetime.utcnow(), due_date=row.get("due_date"), invoice_number=row.get("invoice_number") or row.get("document_number"), description=row.get("description") or row.get("notes"), party_name=row.get("customer_name") or row.get("supplier_name"), currency=row.get("currency") or "TRY", exchange_rate=row.get("exchange_rate") or 1, subtotal=row.get("subtotal") or total - (row.get("tax_total") or 0), tax_total=row.get("tax_total") or 0, grand_total=total, paid_amount=row.get("paid_amount") or row.get("collected_amount") or 0, remaining_amount=row.get("remaining_amount") if row.get("remaining_amount") is not None else total - (row.get("paid_amount") or 0), payment_status=row.get("payment_status") or "Ödenmedi"); session.add(record); result["transactions"] += 1; session.flush(); return "transaction", record.id
         elif kind == "Rezervasyon":
             customer = session.query(Customer).filter(func.lower(Customer.first_name) == (row.get("customer_name") or "").lower()).first()
             if not customer: customer=Customer(first_name=row.get("customer_name"), email=row.get("email"), phone=row.get("phone")); session.add(customer); session.flush(); result["customers"] += 1
             tour=session.query(Tour).filter((Tour.code == row.get("tour_code")) | (Tour.name == row.get("tour_name"))).first() if row.get("tour_code") or row.get("tour_name") else None
-            session.add(Booking(booking_number=row["booking_number"], booking_date=row.get("transaction_date") or datetime.utcnow(), service_start_date=row.get("service_date"), tour_id=tour.id if tour else None, customer_id=customer.id, passenger_count=row.get("passenger_count") or 0, adult_count=row.get("adult_count") or 0, child_count=row.get("child_count") or 0, currency=row.get("currency") or "TRY", unit_price=row.get("unit_price") or 0, grand_total=row.get("grand_total") or 0, collected_total=row.get("collected_amount") or 0, remaining_amount=row.get("remaining_amount") or 0, booking_status=row.get("payment_status"), voucher_number=row.get("voucher_number"), notes=row.get("notes"))); result["bookings"] += 1
+            record=Booking(booking_number=row["booking_number"], booking_date=row.get("transaction_date") or datetime.utcnow(), service_start_date=row.get("service_date"), tour_id=tour.id if tour else None, customer_id=customer.id, passenger_count=row.get("passenger_count") or 0, adult_count=row.get("adult_count") or 0, child_count=row.get("child_count") or 0, currency=row.get("currency") or "TRY", unit_price=row.get("unit_price") or 0, grand_total=row.get("grand_total") or 0, collected_total=row.get("collected_amount") or 0, remaining_amount=row.get("remaining_amount") or 0, booking_status=row.get("payment_status"), voucher_number=row.get("voucher_number"), notes=row.get("notes")); session.add(record); result["bookings"] += 1; session.flush(); return "booking", record.id
         elif kind == "Tahsilat":
             booking=session.query(Booking).filter(Booking.booking_number == row["booking_number"]).one(); session.add(Collection(booking_id=booking.id, customer_id=booking.customer_id, collection_date=row.get("transaction_date") or datetime.utcnow(), amount=row.get("collected_amount"), amount_in_tl=(row.get("collected_amount") or 0)*(row.get("exchange_rate") or 1), currency=row.get("currency") or "TRY", payment_method=row.get("payment_method"), notes=row.get("notes")))
         elif kind == "Tedarikçi Ödemesi":
@@ -372,11 +375,14 @@ class ImportExecutionService:
         elif kind == "Voucher":
             booking=session.query(Booking).filter(Booking.booking_number==row["booking_number"]).one(); session.add(Voucher(booking_id=booking.id, voucher_number=row["voucher_number"], travel_date=row.get("service_date"), service_name=row.get("tour_name"), notes=row.get("notes")))
         elif kind == "Banka Hareketleri": session.add(BankTransaction(transaction_date=row.get("transaction_date"), description=row.get("description"), reference_number=row.get("document_number"), amount=row.get("grand_total") or row.get("credit") or -(row.get("debit") or 0), currency=row.get("currency") or "TRY", transaction_type=row.get("transaction_type"), import_batch_id=batch_id))
-        elif kind == "Restoran Mutabakatı":
-            supplier=session.query(Supplier).filter(func.lower(Supplier.name)==(row.get("supplier_name") or row.get("restaurant_name") or "").lower()).first()
-            if not supplier: supplier=Supplier(name=row.get("supplier_name") or row.get("restaurant_name"), supplier_type="Restoran"); session.add(supplier); session.flush(); result["suppliers"] += 1
-            session.add(SupplierPayment(supplier_id=supplier.id, invoice_reference=row.get("invoice_number") or row.get("voucher_number"), service_date=row.get("service_date"), total_debt=row.get("grand_total") or 0, remaining_amount=row.get("grand_total") or 0, currency=row.get("currency") or "TRY"))
+        elif kind in {"Restoran Mutabakatı", "Otel Mutabakatı"}:
+            supplier_name = row.get("supplier_name") or row.get("restaurant_name") or row.get("hotel_name")
+            supplier=session.query(Supplier).filter(func.lower(Supplier.name)==(supplier_name or "").lower()).first()
+            if not supplier: supplier=Supplier(name=supplier_name, supplier_type="Restoran" if kind == "Restoran Mutabakatı" else "Otel"); session.add(supplier); session.flush(); result["suppliers"] += 1
+            record=SupplierPayment(supplier_id=supplier.id, booking_id=(session.query(Booking).filter(Booking.booking_number == row.get("booking_number")).first().id if row.get("booking_number") and session.query(Booking).filter(Booking.booking_number == row.get("booking_number")).first() else None), invoice_reference=row.get("invoice_number") or row.get("voucher_number"), service_date=row.get("service_date"), total_debt=row.get("grand_total") or 0, remaining_amount=row.get("grand_total") or 0, currency=row.get("currency") or "TRY", payment_status="Ödeme Bekliyor"); session.add(record); session.flush(); return "supplier_payment", record.id
         else: raise ValueError(f"{kind} veri türü için hedef tablo seçilmedi.")
+        session.flush()
+        return kind, None
 
 
 def parse_decimal(value): return ValueNormalizationService.decimal(value) or Decimal("0.00")
