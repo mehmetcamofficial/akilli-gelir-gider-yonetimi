@@ -41,7 +41,7 @@ from views.communications import (
 )
 from views.business_value import (
     render_currency_management, render_current_account_reconciliation,
-    render_daily_work_center, render_supplier_contracts,
+    render_daily_work_center, render_contract_prices,
     render_tour_budget_analysis,
 )
 
@@ -62,7 +62,7 @@ def main():
             ("Genel", ["Günlük İş Merkezi", "Genel Bakış"]),
             ("Rezervasyonlar", ["Rezervasyonlar", "Turlar ve Paketler", "Tur Kârlılığı"]),
             ("Finans", ["Gelir ve Giderler", "Faturalar", "Tahsilatlar", "Tedarikçi Ödemeleri", "Cari Hesap Mutabakatı", "Kur Yönetimi", "Tedarikçi Ödeme Mutabakatı", "Banka Hareketleri ve Mutabakat"]),
-            ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Tedarikçi Sözleşmeleri", "Oteller", "Transferler", "Rehberler"]),
+            ("Çekirdek Operasyon", ["Müşteriler ve Yolcular", "Tedarikçiler", "Sözleşme ve Fiyatlar", "Oteller", "Transferler", "Rehberler"]),
             ("Hesaplar", ["Cari Hesaplar", "Kasa ve Bankalar"]),
             ("Mutabakat", ["Belge Mutabakatı", "Restoran Mutabakatı", "Otel Mutabakatı", "Onay Bekleyen İşlemler", "İşlem Geçmişi"]),
             ("Yapay Zekâ", ["AI Belge İnceleme", "AI Muhasebe Asistanı", "AI İçgörüler", "Tedarikçi İtiraz Taslağı"]),
@@ -107,8 +107,8 @@ def main():
         render_customers()
     elif selected_page == "Tedarikçiler":
         render_suppliers()
-    elif selected_page == "Tedarikçi Sözleşmeleri":
-        render_supplier_contracts()
+    elif selected_page == "Sözleşme ve Fiyatlar":
+        render_contract_prices()
     elif selected_page == "Oteller":
         render_hotels()
     elif selected_page == "Transferler":

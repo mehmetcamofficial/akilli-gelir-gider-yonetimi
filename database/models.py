@@ -952,6 +952,18 @@ class SupplierContract(Base):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    contract_type = Column(String(50), nullable=True, index=True)
+    title = Column(String(255))
+    description = Column(Text)
+    valid_until = Column(DateTime, nullable=True, index=True)
+    tax_included = Column(Boolean, default=False, nullable=False)
+    tax_rate = Column(Numeric(8, 4), default=Decimal("0"), nullable=False)
+    payment_method = Column(String(100))
+    cancellation_policy = Column(Text)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    status = Column(String(50), default="Taslak", nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class SupplierContractPrice(Base):
@@ -968,6 +980,78 @@ class SupplierContractPrice(Base):
     rules = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     __table_args__ = (Index("uq_contract_service_code", "contract_id", "service_code", unique=True),)
+
+
+class ContractVersion(Base):
+    __tablename__ = "contract_versions"
+    id = Column(Integer, primary_key=True)
+    contract_id = Column(Integer, ForeignKey("supplier_contracts.id"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    valid_from = Column(DateTime, nullable=False, index=True)
+    valid_until = Column(DateTime, nullable=False, index=True)
+    title = Column(String(255))
+    terms = Column(JSON)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (Index("uq_contract_version_number", "contract_id", "version_number", unique=True),)
+
+
+class ContractPriceRule(Base):
+    __tablename__ = "contract_price_rules"
+    id = Column(Integer, primary_key=True)
+    version_id = Column(Integer, ForeignKey("contract_versions.id"), nullable=False, index=True)
+    service_type = Column(String(100), nullable=False, index=True)
+    service_name = Column(String(255), nullable=False)
+    tour_id = Column(Integer, ForeignKey("tours.id"), nullable=True, index=True)
+    destination = Column(String(255), nullable=True, index=True)
+    exact_service_date = Column(DateTime, nullable=True, index=True)
+    valid_from = Column(DateTime, nullable=False, index=True)
+    valid_until = Column(DateTime, nullable=False, index=True)
+    pricing_model = Column(String(50), nullable=False)
+    currency = Column(String(10), nullable=False)
+    base_price = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    adult_price = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    child_price = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    infant_price = Column(Numeric(18, 2), default=Decimal("0"), nullable=False)
+    tax_rate = Column(Numeric(8, 4), default=Decimal("0"), nullable=False)
+    tax_included = Column(Boolean, default=False, nullable=False)
+    configuration = Column(JSON)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RestaurantPriceRule(Base):
+    __tablename__ = "restaurant_price_rules"
+    id = Column(Integer, primary_key=True); price_rule_id = Column(Integer, ForeignKey("contract_price_rules.id"), nullable=False, unique=True, index=True)
+    meal_type = Column(String(100)); menu_name = Column(String(255)); guide_price = Column(Numeric(18, 2), default=Decimal("0")); driver_price = Column(Numeric(18, 2), default=Decimal("0")); free_guide = Column(Boolean, default=False); free_driver = Column(Boolean, default=False); free_person_ratio = Column(Integer, default=0); drink_included = Column(Boolean, default=False); drink_price = Column(Numeric(18, 2), default=Decimal("0")); alcoholic_drink_included = Column(Boolean, default=False); dessert_included = Column(Boolean, default=False); additional_service_price = Column(Numeric(18, 2), default=Decimal("0")); minimum_passenger_count = Column(Integer, default=0); group_price = Column(Numeric(18, 2), default=Decimal("0"))
+
+
+class HotelPriceRule(Base):
+    __tablename__ = "hotel_price_rules"
+    id = Column(Integer, primary_key=True); price_rule_id = Column(Integer, ForeignKey("contract_price_rules.id"), nullable=False, unique=True, index=True)
+    room_type = Column(String(100)); board_type = Column(String(10)); single_room = Column(Numeric(18, 2), default=Decimal("0")); double_room = Column(Numeric(18, 2), default=Decimal("0")); triple_room = Column(Numeric(18, 2), default=Decimal("0")); family_room = Column(Numeric(18, 2), default=Decimal("0")); extra_bed = Column(Numeric(18, 2), default=Decimal("0")); child_0_2 = Column(Numeric(18, 2), default=Decimal("0")); child_3_6 = Column(Numeric(18, 2), default=Decimal("0")); child_7_12 = Column(Numeric(18, 2), default=Decimal("0")); adult_supplement = Column(Numeric(18, 2), default=Decimal("0")); single_supplement = Column(Numeric(18, 2), default=Decimal("0")); city_tax = Column(Numeric(18, 2), default=Decimal("0")); holiday_surcharge = Column(Numeric(18, 2), default=Decimal("0")); weekend_surcharge = Column(Numeric(18, 2), default=Decimal("0")); extra_meal = Column(Numeric(18, 2), default=Decimal("0")); free_room_ratio = Column(Integer, default=0); free_guide_room = Column(Boolean, default=False); free_driver_room = Column(Boolean, default=False)
+
+
+class TransferPriceRule(Base):
+    __tablename__ = "transfer_price_rules"
+    id = Column(Integer, primary_key=True); price_rule_id = Column(Integer, ForeignKey("contract_price_rules.id"), nullable=False, unique=True, index=True)
+    origin = Column(String(255), index=True); destination = Column(String(255), index=True); vehicle_type = Column(String(50), index=True); passenger_capacity = Column(Integer); one_way_price = Column(Numeric(18, 2), default=Decimal("0")); round_trip_price = Column(Numeric(18, 2), default=Decimal("0")); waiting_hour_price = Column(Numeric(18, 2), default=Decimal("0")); extra_kilometer_price = Column(Numeric(18, 2), default=Decimal("0")); airport_fee = Column(Numeric(18, 2), default=Decimal("0")); night_surcharge = Column(Numeric(18, 2), default=Decimal("0")); parking_included = Column(Boolean, default=False); toll_included = Column(Boolean, default=False); driver_accommodation = Column(Numeric(18, 2), default=Decimal("0"))
+
+
+class GuidePriceRule(Base):
+    __tablename__ = "guide_price_rules"
+    id = Column(Integer, primary_key=True); price_rule_id = Column(Integer, ForeignKey("contract_price_rules.id"), nullable=False, unique=True, index=True)
+    language = Column(String(100), index=True); service_type = Column(String(100)); half_day_price = Column(Numeric(18, 2), default=Decimal("0")); full_day_price = Column(Numeric(18, 2), default=Decimal("0")); hourly_overtime = Column(Numeric(18, 2), default=Decimal("0")); overnight_allowance = Column(Numeric(18, 2), default=Decimal("0")); meal_allowance = Column(Numeric(18, 2), default=Decimal("0")); transportation_allowance = Column(Numeric(18, 2), default=Decimal("0")); museum_fee = Column(Numeric(18, 2), default=Decimal("0")); accommodation_requirement = Column(Boolean, default=False)
+
+
+class ContractDocument(Base):
+    __tablename__ = "contract_documents"
+    id = Column(Integer, primary_key=True); contract_id = Column(Integer, ForeignKey("supplier_contracts.id"), nullable=False, index=True); version_id = Column(Integer, ForeignKey("contract_versions.id"), nullable=True, index=True); document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True); file_hash = Column(String(128), nullable=False, index=True); drive_file_id = Column(String(255), index=True); replaced_by_id = Column(Integer, ForeignKey("contract_documents.id"), nullable=True); uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ContractPriceHistory(Base):
+    __tablename__ = "contract_price_history"
+    id = Column(Integer, primary_key=True); price_rule_id = Column(Integer, ForeignKey("contract_price_rules.id"), nullable=False, index=True); effective_date = Column(DateTime, nullable=False, index=True); old_price = Column(Numeric(18, 2)); new_price = Column(Numeric(18, 2), nullable=False); change_percentage = Column(Numeric(18, 4)); currency = Column(String(10), nullable=False); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class TourBudget(Base):
